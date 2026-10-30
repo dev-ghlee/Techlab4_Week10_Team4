@@ -52,7 +52,7 @@ public:
 	int PickRotationAxis(const FVector2& MousePos, const FMatrix& ViewProj, int ScreenW, int ScreenH);
 
 
-	void BeginDrag(int Axis, const FRay& MouseRay, const FVector2& MousePos);
+	void BeginDrag(int Axis, const FRay& MouseRay, const FVector2& MousePos, const FMatrix& ViewProj, int ScreenW, int ScreenH);
 	void UpdateDrag(const FRay& MouseRay, const FVector2& MousePos);
 	void EndDrag();
 
@@ -79,6 +79,7 @@ private:
 	int DraggingAxis = -1;
 
 	FVector2 DragStartMousePos;
+	FVector2 DragStartCenterPos;
 	FVector DragStartPoint;
 	FVector DragStartLocation;
 	FRotator DragStartRotation;
@@ -91,7 +92,6 @@ private:
 	FVector ViewCameraLocation{};
 	bool bViewCameraOrthographic = false;
 
-	float DragStartAngle;
 	float RingRadius = 1.0f;
 
 	// Light Component인 경우 Radius를 증감하기 위한 멤버변수와 함수

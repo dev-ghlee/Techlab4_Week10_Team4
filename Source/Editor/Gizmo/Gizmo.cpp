@@ -43,7 +43,7 @@ void FGizmo::Update(const FRay& MouseRay, const FVector2& MousePos, const FMatri
 	HoveredAxis = PickAxis(MousePos, ViewProj, ScreenW, ScreenH); // 현재 마우스가 올라간 기즈모 축이 있으면
 
 	if (bMouseDown && HoveredAxis >= 0) // 마우스가 올라간 축이 있고 마우스가 눌렸으면
-		BeginDrag(HoveredAxis, MouseRay, MousePos);
+		BeginDrag(HoveredAxis, MouseRay, MousePos, ViewProj, ScreenW, ScreenH);
 
 
 }
@@ -180,9 +180,10 @@ bool FGizmo::ApplyScaleToLight(float Factor)
 }
 
 // 시작 Transform·교차점을 저장하고 조작 축의 드래그 평면을 정한다.
-void FGizmo::BeginDrag(int Axis, const FRay& MouseRay, const FVector2& MousePos)
+void FGizmo::BeginDrag(int Axis, const FRay& MouseRay, const FVector2& MousePos, const FMatrix& ViewProj, int ScreenW, int ScreenH)
 {
 	DragStartMousePos = MousePos;
+	DragStartCenterPos = WorldToScreen(GetRenderLocation(), ViewProj, ScreenW, ScreenH);
 	DraggingAxis = Axis;
 	DragStartLocation = GetLocation();
 	DragStartRenderLocation = GetRenderLocation();    
@@ -200,7 +201,7 @@ void FGizmo::BeginDrag(int Axis, const FRay& MouseRay, const FVector2& MousePos)
 	{
 		if (Mode == EGizmoMode::Rotation)
 		{
-			DragAxisDirection = (GetRenderLocation() - GetCameraLocation()).Normalized();
+			DragAxisDirection = (GetCameraLocation() - GetRenderLocation()).Normalized();
 			DragPlaneNormal = DragAxisDirection;
 		}
 		else
@@ -230,15 +231,26 @@ void FGizmo::BeginDrag(int Axis, const FRay& MouseRay, const FVector2& MousePos)
 		DragStartPoint = MouseRay.Origin + MouseRay.Direction * t;
 	else
 		DragStartPoint = DragStart;
-
-	if (Mode == EGizmoMode::Rotation)
-		DragStartAngle = ComputeAngleOnPlane(DragStartPoint, Axis);
 }
 
 // 평면 교차점 변화를 이동·회전·크기에 반영한다.
 void FGizmo::UpdateDrag(const FRay& MouseRay, const FVector2& MousePos)
 {
 	const FVector DragStart = Mode == EGizmoMode::Location ? DragStartLocation : DragStartRenderLocation;
+
+	if (Mode == EGizmoMode::Rotation)
+	{
+		FVector2 Start = DragStartMousePos - DragStartCenterPos;
+		FVector2 Current = MousePos - DragStartCenterPos;
+		float Angle = std::atan2(Start.X * Current.Y - Start.Y * Current.X, Start.X * Current.X + Start.Y * Current.Y);
+
+		FQuat Delta = FQuat::MakeFromAxisAngle(DragAxisDirection, Angle);
+
+		FQuat result = Delta * DragStartRotation.Quaternion();
+
+		Target->SetRelativeRotation(result.ToFRotator());
+		return;
+	}
 
 	float t;
 	if (!RayIntersectsPlane(MouseRay, DragStart, DragPlaneNormal, t))
@@ -262,20 +274,6 @@ void FGizmo::UpdateDrag(const FRay& MouseRay, const FVector2& MousePos)
 			if (!ApplyScaleToLight(factor)) 	// 조명이면 여기서 radius만 변경하고 return
 				Target->SetRelativeScale3D(DragStartScale * factor);
 		}
-		return;
-	}
-
-	if (Mode == EGizmoMode::Rotation)
-	{
-		float currentAngle = ComputeAngleOnPlane(current, DraggingAxis);
-		float deltaAngle = currentAngle - DragStartAngle;
-
-		FQuat delta = FQuat::MakeFromAxisAngle(DragAxisDirection, deltaAngle);
-		FQuat start = DragStartRotation.Quaternion();
-
-		FQuat result = delta * start;
-
-		Target->SetRelativeRotation(result.ToFRotator());
 		return;
 	}
 
