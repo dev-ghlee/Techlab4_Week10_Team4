@@ -175,6 +175,8 @@ bool UEditorEngine::Init()
 
 	UIEditorPanel = EditorUI->AddEditorPanel<FUIEditorPanel>();
 	SkeletalMeshEditorPanel = EditorUI->AddEditorPanel<FSkeletalMeshEditorPanel>();
+	SkeletalMeshEditorPanel->SetEditorSettings(&SettingsPanel->GetMutableSettings());
+
 	ContentDrawerPanel->SetCreateWidgetCallback([this](const FString& Path) { UIEditorPanel->NewAsset(Path); });
 	ContentDrawerPanel->SetOpenWidgetCallback([this](const FString& Path) { UIEditorPanel->OpenAsset(Path); });
 

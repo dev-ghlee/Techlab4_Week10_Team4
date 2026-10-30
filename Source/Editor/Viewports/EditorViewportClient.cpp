@@ -27,12 +27,18 @@ void FEditorViewportClient::TickInput(float DeltaTime, bool bCaptured,
   Input.bLeft = FInputSystem::IsKeyDown(EKeyCode::A);
   Input.bUp = FInputSystem::IsKeyDown(EKeyCode::E);
   Input.bDown = FInputSystem::IsKeyDown(EKeyCode::Q);
-  FViewportCameraState Camera{ViewLocation, ViewRotation, OrthoWidth,
-      Width > 0 ? static_cast<float>(Width) : 800.0f, bIsPerspective};
-  ApplyViewportCameraMovement(Camera, Input, DeltaTime, MoveSpeed, MouseSensitivity);
-  ViewLocation = Camera.Location;
-  ViewRotation = Camera.Rotation;
-  OrthoWidth = Camera.OrthoWidth;
+  ApplyCameraInput(Input, DeltaTime, MoveSpeed, MouseSensitivity);
+}
+
+void FEditorViewportClient::ApplyCameraInput(const FViewportCameraInput& Input, float DeltaTime, float MoveSpeed,
+	float MouseSensitivity)
+{
+    FViewportCameraState Camera{ ViewLocation, ViewRotation, OrthoWidth,
+      Width > 0 ? static_cast<float>(Width) : 800.0f, bIsPerspective };
+    ApplyViewportCameraMovement(Camera, Input, DeltaTime, MoveSpeed, MouseSensitivity);
+    ViewLocation = Camera.Location;
+    ViewRotation = Camera.Rotation;
+    OrthoWidth = Camera.OrthoWidth;
 }
 
 // 기즈모 조작 및 액터 피킹 갱신

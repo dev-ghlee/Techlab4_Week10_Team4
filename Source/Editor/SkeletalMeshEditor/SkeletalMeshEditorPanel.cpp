@@ -1,6 +1,8 @@
 #include "EnginePCH.h"
 #include "SkeletalMeshEditorPanel.h"
 
+#include "Camera/ViewportCameraMovement.h"
+#include "Editor/Settings/SettingsPanel.h"
 #include "Engine/World.h"
 
 bool FSkeletalMeshEditorPanel::Init()
@@ -33,7 +35,7 @@ void FSkeletalMeshEditorPanel::OnRender()
 			ImGui::TableSetupColumn("Tree", ImGuiTableColumnFlags_WidthFixed, 250.0f);
 
 			ImGui::TableNextColumn();
-
+			
 			const ImVec2 ViewportSize = ImGui::GetContentRegionAvail();
 			const uint32 Width = static_cast<uint32>(std::max(1.0f, ViewportSize.x));
 			const uint32 Height = static_cast<uint32>(std::max(1.0f, ViewportSize.y));
@@ -44,14 +46,23 @@ void FSkeletalMeshEditorPanel::OnRender()
 
 			if (ViewportClient.GetColorTarget() && ViewportClient.GetColorTarget()->GetSRV())
 			{
-				ImGui::Image(ViewportClient.GetColorTarget()->GetSRV(), ImVec2(static_cast<float>(Width), static_cast<float>(Height)));
+				const ImVec2 Min = ImGui::GetCursorScreenPos();
+				const ImVec2 Size(static_cast<float>(Width), static_cast<float>(Height));
+				ImGui::InvisibleButton("##PreviewViewport", Size, ImGuiButtonFlags_MouseButtonRight);
+				ImGui::GetWindowDrawList()->AddImage(ViewportClient.GetColorTarget()->GetSRV(), Min, ImVec2(Min.x + Size.x, Min.y + Size.y));
+				TickCameraInput();
 			}
 
 			ImGui::TableNextColumn();
 
 			ImGui::SeparatorText("Skeleton Tree");
 
-			DrawBoneTreeNode(0);
+			if (ImGui::BeginChild("##SkeletonTree", ImVec2(0, 0), false))
+			{
+				DrawBoneTreeNode(0);
+				
+				ImGui::EndChild();
+			}
 
 			if (ImGui::IsWindowHovered() &&
 				!ImGui::IsAnyItemHovered() &&
@@ -73,6 +84,35 @@ UWorld* FSkeletalMeshEditorPanel::ReleasePreviewWorld()
 	UWorld* World = PreviewWorld;
 	PreviewWorld = nullptr;
 	return World;
+}
+
+void FSkeletalMeshEditorPanel::TickCameraInput()
+{
+	if (!Settings) return;
+
+	if (ImGui::IsItemActivated())
+	{
+		ImGui::SetWindowFocus();
+	}
+
+	const ImGuiIO& IO = ImGui::GetIO();
+	const bool bCaptured = ImGui::IsItemActive();
+
+	FViewportCameraInput Input{
+		.bCaptured = bCaptured,
+		.bAllowWheel = bCaptured || ImGui::IsItemHovered(),
+		.bForward = ImGui::IsKeyDown(ImGuiKey_W),
+		.bBackward = ImGui::IsKeyDown(ImGuiKey_S),
+		.bRight = ImGui::IsKeyDown(ImGuiKey_D),
+		.bLeft = ImGui::IsKeyDown(ImGuiKey_A),
+		.bUp = ImGui::IsKeyDown(ImGuiKey_E),
+		.bDown = ImGui::IsKeyDown(ImGuiKey_Q),
+		.MouseX = static_cast<float>(IO.MouseDelta.x),
+		.MouseY = static_cast<float>(IO.MouseDelta.y),
+		.Wheel = static_cast<float>(IO.MouseWheel) * 120.0f,
+	};
+
+	ViewportClient.ApplyCameraInput(Input, IO.DeltaTime, 2.0f * Settings->CameraSpeed, 0.2f * Settings->MouseSensitivity);
 }
 
 void FSkeletalMeshEditorPanel::BuildDummySkeleton()

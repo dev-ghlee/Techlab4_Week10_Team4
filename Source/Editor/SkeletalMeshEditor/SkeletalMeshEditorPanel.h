@@ -4,6 +4,7 @@
 #include "Editor/EditorUI/EditorPanel.h"
 #include "Editor/Viewports/EditorViewportClient.h"
 
+struct FEditorSettings;
 class UWorld;
 
 class FSkeletalMeshEditorPanel : public IEditorPanel
@@ -19,11 +20,14 @@ public:
 	UWorld* ReleasePreviewWorld();
 	UWorld* GetPreviewWorld() const { return PreviewWorld; }
 	FEditorViewportClient* GetViewportClient() { return &ViewportClient; }
+	void SetEditorSettings(const FEditorSettings* InSettings) { Settings = InSettings; }
 
 	const TArray<FMatrix>& GetComponentSpacePose() const { return ComponentSpacePose; }
 	const FReferenceSkeleton& GetReferenceSkeleton() const { return ReferenceSkeleton; }
 
 private:
+	void TickCameraInput();
+
 	void BuildDummySkeleton();
 	void ResetPose();
 	void UpdateComponentSpacePose();
@@ -32,6 +36,7 @@ private:
 
 	UWorld* PreviewWorld = nullptr;
 	FEditorViewportClient ViewportClient;
+	const FEditorSettings* Settings = nullptr;
 
 	FReferenceSkeleton ReferenceSkeleton;
 	TArray<FTransform> LocalPose;

@@ -12,6 +12,7 @@
 
 #include <functional>
 
+struct FViewportCameraInput;
 class UWorld;
 class FGizmo;
 class AActor;
@@ -87,6 +88,8 @@ public:
 	// 카메라 입력 처리
 	void TickInput(float DeltaTime, bool bCaptured, bool bHovered,
 		int32 WheelDelta, float MoveSpeed, float MouseSensitivity);
+
+	void ApplyCameraInput(const FViewportCameraInput& Input, float DeltaTime, float MoveSpeed, float MouseSensitivity);
 
 	// 기즈모 조작과 피킹 처리
 	void
