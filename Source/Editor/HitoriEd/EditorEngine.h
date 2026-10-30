@@ -48,6 +48,8 @@
 
 #include "EditorEngine.generated.h"
 
+class FSkeletalMeshEditorPanel;
+
 inline constexpr int32 InvalidViewIndex = -1;
 
 UCLASS()
@@ -140,6 +142,8 @@ private:
 	bool IsPlayingView(int32 ViewIndex) const { return PlayWorld && ViewIndex == PIEViewIndex && !bIsPaused && !IsSimulatingInEditor(); }
 	bool IsSimulatingInEditor() const;
 
+	void RenderSkeletalMeshPreview();
+
 	// FEngineLoop 소유. OnInit에서 받아 둔다.
 	FWindow* MainWindow = nullptr;
 	FSwapchain* MainWindowSC = nullptr;
@@ -177,6 +181,7 @@ private:
 	FOutlinerPanel* OutlinerPanel = nullptr;
 	FContentDrawerPanel* ContentDrawerPanel = nullptr;
 	FUIEditorPanel* UIEditorPanel = nullptr;
+	FSkeletalMeshEditorPanel* SkeletalMeshEditorPanel = nullptr;
 
 	UWorld* EditorWorld = nullptr;
 	UWorld* PlayWorld = nullptr;
