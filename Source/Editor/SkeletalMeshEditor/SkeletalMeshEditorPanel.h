@@ -14,6 +14,8 @@ public:
 	virtual void OnRender() override;
 	virtual const char* GetPanelName() const override { return "Skeletal Mesh Editor"; }
 
+	void DrawBones(FLineBatcher& LineBatcher) const;
+
 	UWorld* ReleasePreviewWorld();
 	UWorld* GetPreviewWorld() const { return PreviewWorld; }
 	FEditorViewportClient* GetViewportClient() { return &ViewportClient; }
@@ -26,10 +28,15 @@ private:
 	void ResetPose();
 	void UpdateComponentSpacePose();
 
+	void DrawBoneTreeNode(int32 BoneIndex);
+
 	UWorld* PreviewWorld = nullptr;
 	FEditorViewportClient ViewportClient;
 
 	FReferenceSkeleton ReferenceSkeleton;
 	TArray<FTransform> LocalPose;
 	TArray<FMatrix> ComponentSpacePose;
+
+	TArray<TArray<int32>> Children;
+	int32 SelectedBoneIndex = -1;
 };

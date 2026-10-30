@@ -22,19 +22,45 @@ void FSkeletalMeshEditorPanel::Tick(float DeltaTime)
 
 void FSkeletalMeshEditorPanel::OnRender()
 {
-	if (ImGui::Begin(GetPanelName(), nullptr))
+	bool bPanelOpen = IsOpen();
+	if (ImGui::Begin(GetPanelName(), &bPanelOpen))
 	{
-		const ImVec2 ViewportSize = ImGui::GetContentRegionAvail();
-		const uint32 Width = static_cast<uint32>(std::max(1.0f, ViewportSize.x));
-		const uint32 Height = static_cast<uint32>(std::max(1.0f, ViewportSize.y));
-		if (Width != ViewportClient.GetWidth() || Height != ViewportClient.GetHeight())
-		{
-			ViewportClient.Resize(Width, Height);
-		}
+		SetOpen(bPanelOpen);
 
-		if (ViewportClient.GetColorTarget() && ViewportClient.GetColorTarget()->GetSRV())
+		if (ImGui::BeginTable("##SkeletalMeshEditorLayout", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV))
 		{
-			ImGui::Image(ViewportClient.GetColorTarget()->GetSRV(), ImVec2(static_cast<float>(Width), static_cast<float>(Height)));
+			ImGui::TableSetupColumn("Viewport", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableSetupColumn("Tree", ImGuiTableColumnFlags_WidthFixed, 250.0f);
+
+			ImGui::TableNextColumn();
+
+			const ImVec2 ViewportSize = ImGui::GetContentRegionAvail();
+			const uint32 Width = static_cast<uint32>(std::max(1.0f, ViewportSize.x));
+			const uint32 Height = static_cast<uint32>(std::max(1.0f, ViewportSize.y));
+			if (Width != ViewportClient.GetWidth() || Height != ViewportClient.GetHeight())
+			{
+				ViewportClient.Resize(Width, Height);
+			}
+
+			if (ViewportClient.GetColorTarget() && ViewportClient.GetColorTarget()->GetSRV())
+			{
+				ImGui::Image(ViewportClient.GetColorTarget()->GetSRV(), ImVec2(static_cast<float>(Width), static_cast<float>(Height)));
+			}
+
+			ImGui::TableNextColumn();
+
+			ImGui::SeparatorText("Skeleton Tree");
+
+			DrawBoneTreeNode(0);
+
+			if (ImGui::IsWindowHovered() &&
+				!ImGui::IsAnyItemHovered() &&
+				ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+			{
+				SelectedBoneIndex = -1;
+			}
+
+			ImGui::EndTable();
 		}
 	}
 
@@ -79,6 +105,16 @@ void FSkeletalMeshEditorPanel::BuildDummySkeleton()
 	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.5f, 0.0f });
 
 	ResetPose();
+
+	Children.SetNum(ReferenceSkeleton.RefBoneInfo.Num());
+	for (int32 BoneIndex = 0; BoneIndex < ReferenceSkeleton.RefBoneInfo.Num(); ++BoneIndex)
+	{
+		const int32 ParentIndex = ReferenceSkeleton.RefBoneInfo[BoneIndex].ParentIndex;
+		if (ParentIndex >= 0)
+		{
+			Children[ParentIndex].Add(BoneIndex);
+		}
+	}
 }
 
 void FSkeletalMeshEditorPanel::ResetPose()
@@ -99,5 +135,63 @@ void FSkeletalMeshEditorPanel::UpdateComponentSpacePose()
 		const int32 ParentIndex = ReferenceSkeleton.RefBoneInfo[BoneIndex].ParentIndex;
 		ComponentSpacePose[BoneIndex] = LocalPose[BoneIndex].GetLocalMatrix() *
 			(ParentIndex >= 0 ? ComponentSpacePose[ParentIndex] : FMatrix::Identity);
+	}
+}
+
+void FSkeletalMeshEditorPanel::DrawBoneTreeNode(int32 BoneIndex)
+{
+	if (BoneIndex < 0 || BoneIndex >= ReferenceSkeleton.RefBoneInfo.Num())
+		return;
+
+	const auto& RefBoneInfo = ReferenceSkeleton.RefBoneInfo[BoneIndex];
+
+	const bool bIsLeaf = Children[BoneIndex].Num() == 0;
+
+	ImGuiTreeNodeFlags Flags =
+		ImGuiTreeNodeFlags_OpenOnArrow |
+		ImGuiTreeNodeFlags_OpenOnDoubleClick |
+		ImGuiTreeNodeFlags_SpanAvailWidth |
+		ImGuiTreeNodeFlags_DefaultOpen;
+
+	if (bIsLeaf)
+	{
+		Flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+	}
+
+	if (BoneIndex == SelectedBoneIndex)
+	{
+		Flags |= ImGuiTreeNodeFlags_Selected;
+	}
+
+	const FString Name = RefBoneInfo.Name.ToString();
+	ImGui::PushID(BoneIndex);
+	bool bOpen = ImGui::TreeNodeEx("##Bone", Flags, "%s", Name.c_str());
+	ImGui::PopID();
+
+	if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen())
+	{
+		SelectedBoneIndex = BoneIndex;
+	}
+	
+	if (bOpen && !bIsLeaf)
+	{
+		for (int32 ChildIndex : Children[BoneIndex])
+		{
+			DrawBoneTreeNode(ChildIndex);
+		}
+
+		ImGui::TreePop();
+	}
+}
+
+void FSkeletalMeshEditorPanel::DrawBones(FLineBatcher& LineBatcher) const
+{
+	for (int32 BoneIndex = 0; BoneIndex < ComponentSpacePose.Num(); ++BoneIndex)
+	{
+		const int32 ParentIndex = ReferenceSkeleton.RefBoneInfo[BoneIndex].ParentIndex;
+		if (ParentIndex < 0) continue;
+		const FVector ParentLocation = ComponentSpacePose[ParentIndex].GetOrigin();
+		const FVector4 Color = BoneIndex == SelectedBoneIndex ? FVector4{ 1.0f, 0.0f, 0.0f, 1.0f } : FVector4{ 1.0f, 1.0f, 1.0f, 1.0f };
+		LineBatcher.AddLine(ParentLocation, ComponentSpacePose[BoneIndex].GetOrigin(), Color);
 	}
 }

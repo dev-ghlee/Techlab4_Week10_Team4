@@ -741,17 +741,8 @@ void UEditorEngine::RenderSkeletalMeshPreview()
 		{
 			Overlays.EditorLines = [this, &SceneView]
 				{
-					const auto& ComponentSpacePoses = SkeletalMeshEditorPanel->GetComponentSpacePose();
-					const auto& RefBoneInfo = SkeletalMeshEditorPanel->GetReferenceSkeleton().RefBoneInfo;
-
 					LineBatcher->BeginFrame();
-					for (int32 BoneIndex = 0; BoneIndex < ComponentSpacePoses.Num(); ++BoneIndex)
-					{
-						const int32 ParentIndex = RefBoneInfo[BoneIndex].ParentIndex;
-						if (ParentIndex < 0) continue;
-						const FVector ParentLocation = ComponentSpacePoses[ParentIndex].GetOrigin();
-						LineBatcher->AddLine(ParentLocation, ComponentSpacePoses[BoneIndex].GetOrigin(), FVector4{ 1.0f, 1.0f, 1.0f, 1.0f });
-					}
+					SkeletalMeshEditorPanel->DrawBones(*LineBatcher);
 					LineBatcher->OnRender(SceneView.ViewProjectionMatrix);
 				};
 
