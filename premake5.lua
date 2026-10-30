@@ -26,6 +26,10 @@ IncludeDir["lua"]   = "Source/ThirdParty/lua/src"
 IncludeDir["sol2"]  = "Source/ThirdParty/sol2/include"
 IncludeDir["miniaudio"]  = "Source/ThirdParty/miniaudio"
 
+FbxSdkRoot = "Source/ThirdParty/FBXSDK"
+IncludeDir["FBX"] = FbxSdkRoot .. "/include"
+FbxSdkLibraryRoot = FbxSdkRoot .. "/lib/x64"
+
 -- premake의 filter는 project()를 만나면 초기화된다.
 -- 두 프로젝트가 같은 런타임(/MDd vs /MD)으로 컴파일되지 않으면 링크가 실패하므로
 -- 공통 설정을 함수로 묶어 각 프로젝트에서 호출한다.
@@ -96,6 +100,25 @@ function CommonSettings()
 		optimize "speed"
 		symbols  "on"
 
+
+	filter {}
+end
+
+
+-- SDK의 정적 라이브러리는 최종 실행 파일에 연결한다.
+function LinkFbxSdk()
+	links
+	{
+		"libfbxsdk-md.lib",
+		"libxml2-md.lib",
+		"zlib-md.lib",
+	}
+
+	filter "configurations:Debug or Benchmark_Debug"
+		libdirs { FbxSdkLibraryRoot .. "/debug" }
+
+	filter { "configurations:not Debug", "configurations:not Benchmark_Debug" }
+		libdirs { FbxSdkLibraryRoot .. "/release" }
 
 	filter {}
 end
@@ -185,6 +208,7 @@ project "HitoriEngine"
 		"%{IncludeDir.stb}",
 		"%{IncludeDir.json}",
 		"%{IncludeDir.DDSLoader}",
+		"%{IncludeDir.FBX}",
 		"%{IncludeDir.miniaudio}",
 		"%{IncludeDir.lua}",
 		"%{IncludeDir.sol2}",
@@ -217,6 +241,7 @@ project "HitoriEditor"
 	location "Source/Editor"
 	kind     "WindowedApp"
 	CommonSettings()
+	LinkFbxSdk()
 
 	pchheader "EnginePCH.h"
 	pchsource "Source/Editor/EditorPCH.cpp"
@@ -281,6 +306,7 @@ project "HitoriGame"
 	location "Source/Game"
 	kind     "WindowedApp"
 	CommonSettings()
+	LinkFbxSdk()
 	targetname "HitoriGame"
 
 	pchheader "EnginePCH.h"
