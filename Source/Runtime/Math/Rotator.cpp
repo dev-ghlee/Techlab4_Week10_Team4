@@ -28,7 +28,7 @@ FQuat FRotator::Quaternion() const
 	return FQuat::MakeFromEuler(RRad, PRad, YRad);
 }
 
-FRotator FRotator::Identitiy = FRotator(0, 0, 0);
+FRotator FRotator::Identity = FRotator(0, 0, 0);
 
 void FRotator::LookDirection(const FVector& Direction)
 {

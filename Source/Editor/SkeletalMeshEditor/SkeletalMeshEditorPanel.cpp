@@ -10,11 +10,14 @@ bool FSkeletalMeshEditorPanel::Init()
 	ViewportClient.SetViewLocation(FVector{ -4.0f, 0.0f, 2.0f });
 	ViewportClient.SetViewRotation(FVector{ 20.0f, 0.0f, 0.0f });
 
+	BuildDummySkeleton();
+
 	return true;
 }
 
 void FSkeletalMeshEditorPanel::Tick(float DeltaTime)
 {
+	UpdateComponentSpacePose();
 }
 
 void FSkeletalMeshEditorPanel::OnRender()
@@ -44,4 +47,57 @@ UWorld* FSkeletalMeshEditorPanel::ReleasePreviewWorld()
 	UWorld* World = PreviewWorld;
 	PreviewWorld = nullptr;
 	return World;
+}
+
+void FSkeletalMeshEditorPanel::BuildDummySkeleton()
+{
+	ReferenceSkeleton = {};
+	ComponentSpacePose.Reset();
+
+	ReferenceSkeleton.RefBoneInfo.Emplace("Root", -1);
+	ReferenceSkeleton.RefBonePoses.Emplace(FTransform::Identity);
+
+	ReferenceSkeleton.RefBoneInfo.Emplace("Pelvis", 0);
+	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.0f, 1.0f });
+
+	ReferenceSkeleton.RefBoneInfo.Emplace("Spine", 1);
+	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.0f, 0.5f });
+
+	ReferenceSkeleton.RefBoneInfo.Emplace("Head", 2);
+	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.0f, 0.5f });
+
+	ReferenceSkeleton.RefBoneInfo.Emplace("LeftArm", 2);
+	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, -0.3f, 0.4f });
+
+	ReferenceSkeleton.RefBoneInfo.Emplace("LeftHand", 4);
+	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, -0.5f, 0.0f });
+
+	ReferenceSkeleton.RefBoneInfo.Emplace("RightArm", 2);
+	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.3f, 0.4f });
+
+	ReferenceSkeleton.RefBoneInfo.Emplace("RightHand", 6);
+	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.5f, 0.0f });
+
+	ResetPose();
+}
+
+void FSkeletalMeshEditorPanel::ResetPose()
+{
+	LocalPose = ReferenceSkeleton.RefBonePoses;
+}
+
+void FSkeletalMeshEditorPanel::UpdateComponentSpacePose()
+{
+	if (ComponentSpacePose.Num() != LocalPose.Num())
+	{
+		ComponentSpacePose.Reset();
+		ComponentSpacePose.SetNum(LocalPose.Num());
+	}
+
+	for (int32 BoneIndex = 0; BoneIndex < LocalPose.Num(); ++BoneIndex)
+	{
+		const int32 ParentIndex = ReferenceSkeleton.RefBoneInfo[BoneIndex].ParentIndex;
+		ComponentSpacePose[BoneIndex] = LocalPose[BoneIndex].GetLocalMatrix() *
+			(ParentIndex >= 0 ? ComponentSpacePose[ParentIndex] : FMatrix::Identity);
+	}
 }

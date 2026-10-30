@@ -739,26 +739,47 @@ void UEditorEngine::RenderSkeletalMeshPreview()
 	RenderScene(Targets, SceneView, SceneRenderer, PreviewWorld, Options,
 		[this, &SceneView, &Targets](FSceneOverlayCallbacks& Overlays)
 		{
-			const FViewportSettings ViewportSettings
-			{
-				.StartX = 0,
-				.StartY = 0,
-				.Width = Targets.SceneColor->GetWidth(),
-				.Height = Targets.SceneColor->GetHeight(),
-				.MinDepth = 0.0f,
-				.MaxDepth = 1.0f,
-			};
-			Overlays.EditorGrid = [this, &SceneView, ViewportSettings]
+			Overlays.EditorLines = [this, &SceneView]
 				{
-					GridRenderer->OnRenderBatchGrid(
-						SceneView.ViewProjectionMatrix,
-						SceneView.ViewLocation,
-						SceneView.ViewForward,
-						EGridPlane::XY,
-						static_cast<float>(SettingsPanel->GetSettings().GridSpacing),
-						SceneView.bIsPerspective,
-						ViewportSettings);
+					const auto& ComponentSpacePoses = SkeletalMeshEditorPanel->GetComponentSpacePose();
+					const auto& RefBoneInfo = SkeletalMeshEditorPanel->GetReferenceSkeleton().RefBoneInfo;
+
+					LineBatcher->BeginFrame();
+					for (int32 BoneIndex = 0; BoneIndex < ComponentSpacePoses.Num(); ++BoneIndex)
+					{
+						const int32 ParentIndex = RefBoneInfo[BoneIndex].ParentIndex;
+						if (ParentIndex < 0) continue;
+						const FVector ParentLocation = ComponentSpacePoses[ParentIndex].GetOrigin();
+						LineBatcher->AddLine(ParentLocation, ComponentSpacePoses[BoneIndex].GetOrigin(), FVector4{ 1.0f, 1.0f, 1.0f, 1.0f });
+					}
+					LineBatcher->OnRender(SceneView.ViewProjectionMatrix);
 				};
+
+			if (SettingsPanel->GetSettings().bDrawBatchLine)
+			{
+				const FViewportSettings ViewportSettings
+				{
+					.StartX = 0,
+					.StartY = 0,
+					.Width = Targets.SceneColor->GetWidth(),
+					.Height = Targets.SceneColor->GetHeight(),
+					.MinDepth = 0.0f,
+					.MaxDepth = 1.0f,
+				};
+
+				Overlays.EditorGrid = [this, &SceneView, ViewportSettings]
+					{
+						GridRenderer->OnRenderBatchGrid(
+							SceneView.ViewProjectionMatrix,
+							SceneView.ViewLocation,
+							SceneView.ViewForward,
+							EGridPlane::XY,
+							static_cast<float>(SettingsPanel->GetSettings().GridSpacing),
+							SceneView.bIsPerspective,
+							ViewportSettings);
+					};
+			}
+			
 			Overlays.bClearEditorDepth = true;
 		});
 }

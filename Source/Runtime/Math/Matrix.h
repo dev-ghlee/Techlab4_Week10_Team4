@@ -29,7 +29,7 @@ public:
 	//XMMATRIX FMatrixToXMMatrix() const;
 
 	FVector4 GetColumn(int32 i) const;
-	FVector4 GetOrigin();
+	FVector GetOrigin() const;
 	FVector4 GetScaledAxis(FVector4& X, FVector4& Y, FVector4& Z) const;
 	FVector4 TransformFVector4(const FVector4& V) const;	
 	FVector4 TransformFVector4NoScale(const FVector4& V) const;

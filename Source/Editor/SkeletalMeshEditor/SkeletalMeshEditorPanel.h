@@ -1,5 +1,6 @@
 #pragma once
 
+#include "SkeletalTemp.h"
 #include "Editor/EditorUI/EditorPanel.h"
 #include "Editor/Viewports/EditorViewportClient.h"
 
@@ -17,7 +18,18 @@ public:
 	UWorld* GetPreviewWorld() const { return PreviewWorld; }
 	FEditorViewportClient* GetViewportClient() { return &ViewportClient; }
 
+	const TArray<FMatrix>& GetComponentSpacePose() const { return ComponentSpacePose; }
+	const FReferenceSkeleton& GetReferenceSkeleton() const { return ReferenceSkeleton; }
+
 private:
+	void BuildDummySkeleton();
+	void ResetPose();
+	void UpdateComponentSpacePose();
+
 	UWorld* PreviewWorld = nullptr;
 	FEditorViewportClient ViewportClient;
+
+	FReferenceSkeleton ReferenceSkeleton;
+	TArray<FTransform> LocalPose;
+	TArray<FMatrix> ComponentSpacePose;
 };

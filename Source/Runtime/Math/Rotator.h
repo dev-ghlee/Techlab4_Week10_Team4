@@ -18,7 +18,7 @@ struct FRotator
 	FRotator(float P, float Y, float R);
 	FRotator(FVector V);
 
-	static FRotator Identitiy;
+	static FRotator Identity;
 
 	FQuat Quaternion() const;
 

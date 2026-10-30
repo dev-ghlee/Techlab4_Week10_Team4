@@ -7,7 +7,7 @@
 struct FMeshBoneInfo
 {
 	FName Name;
-	int32 ParentIndex;
+	int32 ParentIndex = -1;
 };
 
 struct FReferenceSkeleton
