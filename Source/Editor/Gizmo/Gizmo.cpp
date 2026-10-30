@@ -223,11 +223,13 @@ void FGizmo::BeginDrag(int Axis, const FRay& MouseRay, const FVector2& MousePos)
 		DragPlaneNormal = Ortho.Cross(axis).Normalized();
 	}
 
+	const FVector DragStart = Mode == EGizmoMode::Location ? DragStartLocation : DragStartRenderLocation;
+
 	float t;
-	if (RayIntersectsPlane(MouseRay, DragStartRenderLocation, DragPlaneNormal, t))
+	if (RayIntersectsPlane(MouseRay, DragStart, DragPlaneNormal, t))
 		DragStartPoint = MouseRay.Origin + MouseRay.Direction * t;
 	else
-		DragStartPoint = DragStartRenderLocation;
+		DragStartPoint = DragStart;
 
 	if (Mode == EGizmoMode::Rotation)
 		DragStartAngle = ComputeAngleOnPlane(DragStartPoint, Axis);
@@ -236,8 +238,10 @@ void FGizmo::BeginDrag(int Axis, const FRay& MouseRay, const FVector2& MousePos)
 // 평면 교차점 변화를 이동·회전·크기에 반영한다.
 void FGizmo::UpdateDrag(const FRay& MouseRay, const FVector2& MousePos)
 {
+	const FVector DragStart = Mode == EGizmoMode::Location ? DragStartLocation : DragStartRenderLocation;
+
 	float t;
-	if (!RayIntersectsPlane(MouseRay, DragStartRenderLocation, DragPlaneNormal, t))
+	if (!RayIntersectsPlane(MouseRay, DragStart, DragPlaneNormal, t))
 		return;
 
 	FVector current = MouseRay.Origin + MouseRay.Direction * t;
