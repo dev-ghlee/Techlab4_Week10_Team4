@@ -11,6 +11,7 @@
 #include "Editor/EditorUI/ImGuiRenderer.h"
 #include "Editor/Rendering/GridRenderer.h"
 #include "Editor/Gizmo/GizmoRenderer.h"
+#include "Editor/Gizmo/SceneComponentGizmoTarget.h"
 #include "Render/LineBatcher.h"
 #include "Editor/Rendering/SceneDepthRenderer.h"
 #include "Editor/Rendering/CascadeFloorRenderer.h"
@@ -144,6 +145,12 @@ private:
 
 	void RenderSkeletalMeshPreview();
 
+	void SetSelectedComponent(USceneComponent* Component)
+	{
+		SelectionTarget.SetTarget(Component);
+		Gizmo->SetTarget(Component ? &SelectionTarget : nullptr);
+	}
+
 	// FEngineLoop 소유. OnInit에서 받아 둔다.
 	FWindow* MainWindow = nullptr;
 	FSwapchain* MainWindowSC = nullptr;
@@ -162,6 +169,7 @@ private:
 	TUniquePtr<FCascadeFloorRenderer> CascadeFloorRenderer;
 	TUniquePtr<FUIRenderer> UIRenderer;
 	TUniquePtr<FGizmo> Gizmo;
+	FSceneComponentGizmoTarget SelectionTarget;
 
 	FUIDrawList UIDrawList;
 

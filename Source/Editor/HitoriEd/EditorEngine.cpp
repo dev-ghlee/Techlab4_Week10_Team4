@@ -210,7 +210,7 @@ bool UEditorEngine::Init()
 	OutlinerPanel->SetSelectionCallback(
 		[this](USceneComponent* Root)
 		{
-			Gizmo->SetTarget(Root, true);
+			SetSelectedComponent(Root);
 			DetailsPanel->SetTarget(Root ? Root->GetOwner() : nullptr);
 
 			UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Root);
@@ -225,22 +225,7 @@ bool UEditorEngine::Init()
 	DetailsPanel->SetSelectionCallback(
 		[this](UActorComponent* Component)
 		{
-			if (USceneComponent* SceneComponent = Cast<USceneComponent>(Component))
-			{
-				AActor* Owner = SceneComponent->GetOwner();
-				if (Owner && SceneComponent == Owner->GetRootComponent())
-				{
-					Gizmo->SetTarget(SceneComponent, true);
-				}
-				else
-				{
-					Gizmo->SetTarget(SceneComponent);
-				}
-			}
-			else
-			{
-				Gizmo->SetTarget(nullptr);
-			}
+			SetSelectedComponent(Cast<USceneComponent>(Component));
 		}
 	);
 
@@ -1186,14 +1171,15 @@ void UEditorEngine::RenderFrame(FEditorViewportClient* ViewClient,
 			const FViewportSettings ViewportSetting{ 0, 0, Targets.SceneColor->GetWidth(),Targets.SceneColor->GetHeight(), 0.0f, 1.0f };
 			const bool bIsActiveViewport = ViewportsPanel && SceneView.ViewIndex == ViewportsPanel->GetActiveViewIndex();
 
-			const bool bDrawSelectedLight = bIsActiveViewport && Gizmo->GetTarget() &&
-				(Cast<ASpotLightActor>(Gizmo->GetTarget()->GetOwner()) ||
-					Cast<APointLightActor>(Gizmo->GetTarget()->GetOwner()) ||
-					Cast<ARectLightActor>(Gizmo->GetTarget()->GetOwner()));
+			USceneComponent* SelectedComponent = SelectionTarget.GetTarget();
+			AActor* SelectedActor = SelectedComponent ? SelectedComponent->GetOwner() : nullptr;
+
+			const bool bDrawSelectedLight = bIsActiveViewport &&
+				(Cast<ASpotLightActor>(SelectedActor) || Cast<APointLightActor>(SelectedActor) || Cast<ARectLightActor>(SelectedActor));
 
 			const bool bDrawCascadeBounds = SettingsPanel->GetSettings().bDrawCascadeBounds;
 			{
-				Overlays.EditorLines = [this, ViewClient, &SceneView, bDrawSelectedLight, bDrawCascadeBounds]
+				Overlays.EditorLines = [this, ViewClient, &SceneView, bDrawSelectedLight, bDrawCascadeBounds, SelectedActor]
 					{
 						LineBatcher->BeginFrame();
 						if (bDrawCascadeBounds)
@@ -1228,16 +1214,13 @@ void UEditorEngine::RenderFrame(FEditorViewportClient* ViewClient,
 						}
 						if (bDrawSelectedLight)
 						{
-							if (ASpotLightActor* Light = Cast<ASpotLightActor>(Gizmo->GetTarget()->GetOwner()))
+							if (ASpotLightActor* Light = Cast<ASpotLightActor>(SelectedActor))
 								Light->GetSpotLightComponent()->DrawDebug(LineBatcher.get());
-							else if (APointLightActor* Light = Cast<APointLightActor>(Gizmo->GetTarget()->GetOwner()))
+							else if (APointLightActor* Light = Cast<APointLightActor>(SelectedActor))
 								Light->GetPointLightComponent()->DrawDebug(LineBatcher.get());
-							else if (ARectLightActor* Light = Cast<ARectLightActor>(Gizmo->GetTarget()->GetOwner()))
+							else if (ARectLightActor* Light = Cast<ARectLightActor>(SelectedActor))
 								Light->GetRectLightComponent()->DrawDebug(LineBatcher.get());
 						}
-
-						const AActor* SelectedActor =
-							Gizmo->GetTarget() ? Gizmo->GetTarget()->GetOwner() : nullptr;
 
 						DrawCollisionShapes(EditorWorld, LineBatcher.get(), SelectedActor);
 						DrawSpringArms(EditorWorld, LineBatcher.get(), SelectedActor);
@@ -1539,7 +1522,7 @@ void UEditorEngine::CopyPIEWindowToBackbuffer()
 // 씬 변경으로 무효화된 에디터의 선택 참조를 모두 해제한다.
 void UEditorEngine::ResetSceneSelection()
 {
-	Gizmo->SetTarget(nullptr, false);
+	SetSelectedComponent(nullptr);
 	Outline->SetTarget(nullptr);
 	DetailsPanel->SetTarget(nullptr);
 	OutlinerPanel->SelectActor(nullptr);

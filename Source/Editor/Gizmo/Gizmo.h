@@ -2,10 +2,8 @@
 
 #include "Collision/Ray.h"
 #include "Math/Transform.h"
-#include "Components/SceneComponent.h"
-#include "Components/LocalLightComponent.h"
 
-class UCameraComponent;
+class IGizmoTarget;
 
 enum class EGizmoMode
 {
@@ -24,12 +22,8 @@ class FGizmo   // 상태 + 로직
 {
 public:
 	// Gizmo 대상 설정
-	void SetTarget(USceneComponent* InTarget, bool InbUseActorBounds = false)
-	{ 
-		Target = InTarget; 
-		bUseActorBounds = InbUseActorBounds; 
-	}
-	USceneComponent* GetTarget() const { return Target; }
+	void SetTarget(IGizmoTarget* InTarget) { Target = InTarget; }
+	IGizmoTarget* GetTarget() const { return Target; }
 
 	// Gizmo 모드(이동, 회전, 크기)
 	void SetMode(EGizmoMode InMode) { Mode = InMode; }
@@ -58,10 +52,9 @@ public:
 
 	float ComputeAngleOnPlane(const FVector& Point, int Axis) const;
 
-	inline FTransform GetTransform() const { return Target ? Target->GetTransform() : FTransform(); }
-	inline FVector GetLocation() const { return Target ? Target->GetRelativeLocation() : FVector(0, 0, 0); }
-	inline FRotator GetRotation() const { return Target ? Target->GetRelativeRotation() : FRotator(0, 0, 0); }
-	inline FVector GetScale() const { return Target ? Target->GetRelativeScale3D() : FVector(0, 0, 0); }
+	FVector GetLocation() const;
+	FRotator GetRotation() const;
+	FVector GetScale() const;
 
 	FVector GetRenderLocation() const;
 	// 원근 View에서만 카메라 거리에 맞춰 크기 보정 위치를 구하고 직교 View는 월드 위치를 유지한다.
@@ -72,8 +65,7 @@ private:
 	EGizmoMode Mode = EGizmoMode::Location;
 	EGizmoSpace Space = EGizmoSpace::Local;
 	FTransform Transform = FTransform();
-	USceneComponent* Target = nullptr;
-	bool bUseActorBounds = false;
+	IGizmoTarget* Target = nullptr;
 
 	int HoveredAxis = -1;
 	int DraggingAxis = -1;
@@ -93,9 +85,4 @@ private:
 	bool bViewCameraOrthographic = false;
 
 	float RingRadius = 1.0f;
-
-	// Light Component인 경우 Radius를 증감하기 위한 멤버변수와 함수
-	float DragStartRadius = 0.0f;
-	bool ApplyScaleToLight(float Factor);
-	ULocalLightComponent* GetTargetLight() const;
 };
