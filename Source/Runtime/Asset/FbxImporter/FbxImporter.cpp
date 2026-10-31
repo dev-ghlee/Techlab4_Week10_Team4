@@ -5,12 +5,29 @@
 
 #include <fbxsdk.h>
 
+// Mesh Node와 해당 Skin, Cluster의 연결 관계.
+// 모든 포인터는 SDK 객체를 참조하며 소유하지 않는다.
+struct FFbxSkinCluster
+{
+	// Transform과 재질을 확인할 Mesh의 Node.
+	FbxNode* MeshNode = nullptr;
+
+	// 이 Cluster가 속한 Skin Deformer.
+	FbxSkin* Skin = nullptr;
+
+	// 연결 본, Control Point Weight, 바인드 정보를 제공한다.
+	FbxCluster* Cluster = nullptr;
+};
+
 // 이번 임포트 작업에서만 사용하는 임시 정보.
 struct FImportContext
 {
 	// 삼각형화가 끝난 Mesh를 소유한 Node 목록.
 	// SDK 객체를 참조할 뿐, 소유하거나 직접 해제하지 않는다.
 	TArray<FbxNode*> MeshNodes;
+
+	// 각 Mesh Node에 연결된 Skin과 Cluster 정보.
+	TArray<FFbxSkinCluster> SkinClusters;
 };
 
 bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FString& OutError)
@@ -118,7 +135,50 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		return false;
 	}
 
-	// 이후 여기에 본과 메시 등의 데이터 추출을 추가한다.
+	// 수집한 Mesh Node마다 연결된 Skin을 확인한다.
+	for (FbxNode* MeshNode : Context.MeshNodes)
+	{
+		FbxMesh* Mesh = MeshNode->GetMesh();
+		const int32 SkinCount = Mesh->GetDeformerCount(FbxDeformer::eSkin);
+
+		// Skin이 없으면 반복문을 실행하지 않는다.
+		for (int32 SkinIndex = 0; SkinIndex < SkinCount; ++SkinIndex)
+		{
+			// eSkin으로 조회했으므로 FbxSkin으로 변환한다.
+			FbxSkin* Skin = static_cast<FbxSkin*>(
+				Mesh->GetDeformer(SkinIndex, FbxDeformer::eSkin));
+
+			if (!Skin)
+			{
+				OutError = "Failed to access FBX skin deformer.";
+				return false;
+			}
+
+			// Skin에 연결된 각 Cluster를 수집한다.
+			for (int32 ClusterIndex = 0; ClusterIndex < Skin->GetClusterCount(); ++ClusterIndex)
+			{
+				FbxCluster* Cluster = Skin->GetCluster(ClusterIndex);
+
+				// 연결 본이 없는 Cluster는 스키닝에 사용할 수 없다.
+				if (!Cluster || !Cluster->GetLink())
+				{
+					OutError = "FBX cluster has no valid linked bone.";
+					return false;
+				}
+
+				Context.SkinClusters.Add({ MeshNode, Skin, Cluster });
+			}
+		}
+	}
+
+	// SkeletalMesh를 구성할 연결 정보가 있는지 확인한다.
+	if (Context.SkinClusters.IsEmpty())
+	{
+		OutError = "FBX scene contains no skin clusters.";
+		return false;
+	}
+
+	// 이후 여기에 스키닝 방식 검사와 본, 메시 등의 데이터 추출을 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
 
