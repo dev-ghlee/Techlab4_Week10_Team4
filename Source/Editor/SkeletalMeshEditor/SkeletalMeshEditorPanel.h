@@ -32,6 +32,7 @@ private:
 	void ResetPose();
 	void UpdateComponentSpacePose();
 
+	void DrawViewport();
 	void DrawBoneTreeNode(int32 BoneIndex);
 
 	UWorld* PreviewWorld = nullptr;
