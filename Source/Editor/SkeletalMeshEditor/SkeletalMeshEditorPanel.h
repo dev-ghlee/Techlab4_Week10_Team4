@@ -23,11 +23,13 @@ public:
 	UWorld* GetPreviewWorld() const { return PreviewWorld; }
 	FEditorViewportClient* GetViewportClient() { return &ViewportClient; }
 	void SetEditorSettings(const FEditorSettings* InSettings) { Settings = InSettings; }
+	bool IsFocused() const { return IsOpen() && bFocused; }
 
 	const FGizmo& GetBoneGizmo() const { return BoneGizmo; }
 
 private:
 	void TickCameraInput();
+	void TickGizmoShortcut();
 
 	void BuildDummySkeleton();
 
@@ -41,6 +43,7 @@ private:
 	UWorld* PreviewWorld = nullptr;
 	FEditorViewportClient ViewportClient;
 	const FEditorSettings* Settings = nullptr;
+	bool bFocused = false;
 
 	FGizmo BoneGizmo;
 	FBoneGizmoTarget BoneGizmoTarget;

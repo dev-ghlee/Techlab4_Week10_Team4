@@ -250,6 +250,7 @@ bool UEditorEngine::Init()
 	EditorControlsPanel->SetWorld(EditorWorld);
 	EditorControlsPanel->SetIsPlayingQuery([this]() { return IsPlaying(); });
 	EditorControlsPanel->SetGizmo(Gizmo.get());
+	EditorControlsPanel->SetGizmoInputBlockedQuery([this] { return SkeletalMeshEditorPanel->IsFocused(); });
 	EditorControlsPanel->SetViewportsPanel(ViewportsPanel);
 
 	SettingsPanel->SetWorld(EditorWorld);

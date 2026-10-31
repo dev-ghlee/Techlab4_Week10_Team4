@@ -153,9 +153,11 @@ void FSkeletalMeshEditorPanel::Tick(float DeltaTime)
 void FSkeletalMeshEditorPanel::OnRender()
 {
 	bool bPanelOpen = IsOpen();
+	bFocused = false;
 	if (ImGui::Begin(GetPanelName(), &bPanelOpen))
 	{
 		SetOpen(bPanelOpen);
+		TickGizmoShortcut();
 
 		if (ImGui::BeginTable("##SkeletalMeshEditorLayout", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV))
 		{
@@ -243,6 +245,21 @@ void FSkeletalMeshEditorPanel::TickCameraInput()
 	};
 
 	ViewportClient.ApplyCameraInput(Input, IO.DeltaTime, 2.0f * Settings->CameraSpeed, 0.2f * Settings->MouseSensitivity);
+}
+
+void FSkeletalMeshEditorPanel::TickGizmoShortcut()
+{
+	bFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+	if (!bFocused || ImGui::GetIO().WantTextInput || BoneGizmo.IsUsing())
+	{
+		return;
+	}
+
+	if (ImGui::IsKeyPressed(ImGuiKey_Space, false))
+	{
+		const int NextMode = (static_cast<int>(BoneGizmo.GetMode()) + 1) % 3;
+		BoneGizmo.SetMode(static_cast<EGizmoMode>(NextMode));
+	}
 }
 
 void FSkeletalMeshEditorPanel::BuildDummySkeleton()
