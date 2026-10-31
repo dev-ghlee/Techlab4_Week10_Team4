@@ -178,7 +178,46 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		return false;
 	}
 
-	// 이후 여기에 스키닝 방식 검사와 본, 메시 등의 데이터 추출을 추가한다.
+	for (const FFbxSkinCluster& SkinCluster : Context.SkinClusters)
+	{
+		// 현재 구현은 Mesh 하나에 Skin Deformer 하나만 지원한다.
+		// 복수 Skin의 변형을 단순히 합치면 원본 동작과 달라질 수 있다.
+		FbxMesh* Mesh = SkinCluster.MeshNode->GetMesh();
+		if (Mesh->GetDeformerCount(FbxDeformer::eSkin) > 1)
+		{
+			OutError = "Multiple skin deformers on one mesh are not supported.";
+			return false;
+		}
+
+		// 선형 행렬 블렌딩으로 처리할 수 있는 방식만 허용한다.
+		const FbxSkin::EType SkinningType = SkinCluster.Skin->GetSkinningType();
+		if (SkinningType != FbxSkin::eLinear
+			&& SkinningType != FbxSkin::eRigid)
+		{
+			OutError = "Only linear and rigid skinning are supported.";
+			return false;
+		}
+
+		// Additive는 별도의 변형 계산이 필요하므로 허용하지 않는다.
+		const FbxCluster::ELinkMode LinkMode = SkinCluster.Cluster->GetLinkMode();
+		if (LinkMode != FbxCluster::eNormalize
+			&& LinkMode != FbxCluster::eTotalOne)
+		{
+			OutError = "Only Normalize and TotalOne link modes are supported.";
+			return false;
+		}
+
+		// 같은 Mesh의 Cluster들은 동일한 링크 모드를 사용해야 한다.
+		// 앞선 수집에서 모든 Cluster의 유효성을 확인했으므로 조회할 수 있다.
+		FbxCluster* FirstCluster = SkinCluster.Skin->GetCluster(0);
+		if (LinkMode != FirstCluster->GetLinkMode())
+		{
+			OutError = "FBX mesh contains inconsistent cluster link modes.";
+			return false;
+		}
+	}
+
+	// 이후 여기에 본과 메시 등의 데이터 추출을 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
 
