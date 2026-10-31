@@ -1,7 +1,17 @@
 #include "EnginePCH.h"
 #include "FbxImporter.h"
 
+#include "Containers/Array.h"
+
 #include <fbxsdk.h>
+
+// 이번 임포트 작업에서만 사용하는 임시 정보.
+struct FImportContext
+{
+	// 삼각형화가 끝난 Mesh를 소유한 Node 목록.
+	// SDK 객체를 참조할 뿐, 소유하거나 직접 해제하지 않는다.
+	TArray<FbxNode*> MeshNodes;
+};
 
 bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FString& OutError)
 {
@@ -98,9 +108,39 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		}
 	}
 
-	// 이후 여기에 계층 순회와 데이터 추출을 추가한다.
+	// 하나의 Context를 재귀 호출 전체에서 공유한다.
+	FImportContext Context;
+	LoadSceneRecursive(Scene->GetRootNode(), Context);
+
+	if (Context.MeshNodes.IsEmpty())
+	{
+		OutError = "FBX scene contains no mesh nodes to import.";
+		return false;
+	}
+
+	// 이후 여기에 본과 메시 등의 데이터 추출을 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
 
 	return false;
+}
+
+void FFbxImporter::LoadSceneRecursive(FbxNode* Node, FImportContext& Context)
+{
+	if (!Node)
+	{
+		return;
+	}
+
+	// 이후 Transform과 재질 정보도 사용하므로 Mesh 대신 Node를 저장한다.
+	if (Node->GetMesh())
+	{
+		Context.MeshNodes.Add(Node);
+	}
+
+	// 현재 Node에 Mesh가 없어도 자식 탐색은 계속한다.
+	for (int32 ChildIndex = 0; ChildIndex < Node->GetChildCount(); ++ChildIndex)
+	{
+		LoadSceneRecursive(Node->GetChild(ChildIndex), Context);
+	}
 }
