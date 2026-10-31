@@ -43,8 +43,33 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		return false;
 	}
 
-	// 이후 여기에 전처리, 계층 순회, 데이터 추출을 추가한다.
+	// 엔진 축: 오른쪽 +Y, 위쪽 +Z, 전방 +X.
+	// SDK 문자열 순서는 오른쪽 / 위쪽 / 화면 안쪽 방향이다.
+	FbxAxisSystem EngineAxis;
+	if (!FbxAxisSystem::ParseAxisSystem("yzx", EngineAxis))
+	{
+		OutError = "Failed to define the engine axis system.";
+		
+		return false;
+	}
+
+	// 좌표계가 다를 때 변환하며 좌우 손잡이 변경도 처리한다.
+	if (Scene->GetGlobalSettings().GetAxisSystem() != EngineAxis)
+	{
+		EngineAxis.DeepConvertScene(Scene);
+	}
+
+	// 엔진 길이 단위를 센티미터로 통일한다.
+	const FbxSystemUnit& EngineUnit = FbxSystemUnit::cm;
+	if (Scene->GetGlobalSettings().GetSystemUnit() != EngineUnit)
+	{
+		// 기본 옵션을 사용해 Cluster의 바인드 정보도 함께 변환한다.
+		EngineUnit.ConvertScene(Scene);
+	}
+
+	// 이후 여기에 삼각형화, 계층 순회, 데이터 추출을 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
+
 	return false;
 }
