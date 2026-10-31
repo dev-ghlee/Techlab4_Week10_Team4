@@ -7,6 +7,18 @@
 #include "Render/RenderResourceManager.h"
 #include "Asset/AssetManager.h"
 
+static FVector4 GetAxisDisplayColor(const FGizmo& Gizmo, int Axis, const FVector4& BaseColor)
+{
+	if (Gizmo.GetDraggingAxis() == Axis)
+	{
+		return { 1.0f, 0.64f, 0.13f, 1.0f };
+	}
+	if (Gizmo.GetHoveredAxis() == Axis)
+	{
+		return { 0.87f, 0.56f, 0.13f, 1.0f };
+	}
+	return BaseColor;
+}
 
 // Gizmo 축 렌더링의 초기 상태를 구성한다.
 FGizmoRenderer::FGizmoRenderer()
@@ -25,14 +37,14 @@ bool FGizmoRenderer::Init(FRenderer* InRenderer)
 
 	CB = RenderCommand::CreateConstantBuffer(sizeof(FGizmoData));
 
-	AxisDataArray.Add({ FRotator(90.0f, 0.0f, 0.0f) ,FVector4(1.0f, 0.0f, 0.0f, 1.0f) });
-	AxisDataArray.Add({ FRotator(0.0f, 0.0f, -90.0f) ,FVector4(0.0f, 1.0f, 0.0f, 1.0f) });
-	AxisDataArray.Add({ FRotator(0.0f, 0.0f, 0.0f) ,FVector4(0.0f, 0.4f, 1.0f, 1.0f) });
+	AxisDataArray.Add({ FRotator(90.0f, 0.0f, 0.0f) ,FVector4(0.82f, 0.06f, 0.22f, 1.0f) });
+	AxisDataArray.Add({ FRotator(0.0f, 0.0f, -90.0f) ,FVector4(0.25f, 0.63f, 0.17f, 1.0f) });
+	AxisDataArray.Add({ FRotator(0.0f, 0.0f, 0.0f) ,FVector4(0.12f, 0.4f, 0.96f, 1.0f) });
 
 	AxisDataArray.Add({ FRotator(0.0f, 0.0f, 0.0f) ,FVector4(0.0f, 0.0f, 1.0f, 1.0f) });
 	AxisDataArray.Add({ FRotator(0.0f, 0.0f, 0.0f) ,FVector4(0.0f, 0.0f, 1.0f, 1.0f) });
 	AxisDataArray.Add({ FRotator(0.0f, 0.0f, 0.0f) ,FVector4(0.0f, 0.0f, 1.0f, 1.0f) });
-	AxisDataArray.Add({ FRotator(0.0f, 0.0f, 0.0f) ,FVector4(1.0f, 1.0f, 1.0f, 1.0f) }); // ScreenAxis
+	AxisDataArray.Add({ FRotator(0.0f, 0.0f, 0.0f) ,FVector4(0.94f, 0.95f, 0.96f, 1.0f) }); // ScreenAxis
 
 	Shader = FRenderResourceManager::GetShaderProgram("Resources/Shader/GizmoShader.hlsl");
 
@@ -92,9 +104,7 @@ void FGizmoRenderer::OnRender(
 		FGizmoData Data{};
 		Data.World = World;
 		Data.ViewProj = ViewProj;
-		Data.Color = (i == HoveredAxis)
-			? FVector4(1.0f, 1.0f, 0.0f, 1.0f)     // hover 시 노랑
-			: AxisDataArray[i].Color;
+		Data.Color = GetAxisDisplayColor(Gizmo, i, AxisDataArray[i].Color);
 
 		DrawMesh(AxisMesh, Data);
 	}
@@ -107,9 +117,7 @@ void FGizmoRenderer::OnRender(
 		FGizmoData SphereData{};
 		SphereData.World = Transform.GetLocalMatrix();
 		SphereData.ViewProj = ViewProj;
-		SphereData.Color = (6 == HoveredAxis)
-			? FVector4(1.0f, 1.0f, 0.0f, 1.0f)     // hover 시 노랑
-			: AxisDataArray[6].Color;
+		SphereData.Color = GetAxisDisplayColor(Gizmo, 6, AxisDataArray[6].Color);
 
 		DrawMesh(SphereMesh, SphereData);
 	}
@@ -132,9 +140,7 @@ void FGizmoRenderer::OnRender(
 		FGizmoData Data{};
 		Data.World = (Scale * Rot * Trans);
 		Data.ViewProj = ViewProj;
-		Data.Color = (6 == HoveredAxis)
-			? FVector4(1.0f, 1.0f, 0.0f, 1.0f)     // hover 시 노랑
-			: AxisDataArray[6].Color;
+		Data.Color = GetAxisDisplayColor(Gizmo, 6, AxisDataArray[6].Color);
 
 
 		DrawMesh(RotationMesh, Data);

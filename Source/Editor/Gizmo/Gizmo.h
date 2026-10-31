@@ -39,6 +39,7 @@ public:
 
 	bool IsUsing() const { return DraggingAxis >= 0; }
 	int GetHoveredAxis() const { return HoveredAxis; }
+	int GetDraggingAxis() const { return DraggingAxis; }
 
 	int PickAxis(const FVector2& MousePos, const FMatrix& ViewProj, int ScreenW, int ScreenH);
 

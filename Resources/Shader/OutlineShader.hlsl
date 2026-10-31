@@ -49,7 +49,7 @@ PS_INPUT mainVS(VS_INPUT input)
         clipPosition.xy += pixelDirection * (2.0f * ViewportAndThickness.z / viewportSize) * clipPosition.w;
     }
     output.position = clipPosition;
-    output.color = float4(1.0f, 1.0f, 0.0f, 1.0f);
+    output.color = float4(0.87f, 0.56f, 0.13f, 1.0f);
     return output;
 }
 
