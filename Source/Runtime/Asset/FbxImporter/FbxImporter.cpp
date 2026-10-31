@@ -67,7 +67,38 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		EngineUnit.ConvertScene(Scene);
 	}
 
-	// 이후 여기에 삼각형화, 계층 순회, 데이터 추출을 추가한다.
+	// Scene의 지원 가능한 Geometry를 삼각형화한다.
+	// true: 기존 Geometry를 삼각형화한 결과로 교체한다.
+	// false: 구형 삼각형화 방식을 사용하지 않는다.
+	FbxGeometryConverter GeometryConverter(Manager.Get());
+
+	if (!GeometryConverter.Triangulate(Scene, true, false))
+	{
+		OutError = "Failed to triangulate FBX scene.";
+		return false;
+	}
+
+	// 교체가 끝난 Scene에서 Mesh를 다시 조회한다.
+	const int32 MeshCount = Scene->GetSrcObjectCount<FbxMesh>();
+	if (MeshCount == 0)
+	{
+		OutError = "FBX scene contains no meshes.";
+		return false;
+	}
+
+	// 각 Mesh의 Polygon이 모두 삼각형인지 확인한다.
+	for (int32 MeshIndex = 0; MeshIndex < MeshCount; ++MeshIndex)
+	{
+		FbxMesh* Mesh = Scene->GetSrcObject<FbxMesh>(MeshIndex);
+
+		if (!Mesh || !Mesh->IsTriangleMesh())
+		{
+			OutError = "FBX mesh triangulation verification failed.";
+			return false;
+		}
+	}
+
+	// 이후 여기에 계층 순회와 데이터 추출을 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
 
