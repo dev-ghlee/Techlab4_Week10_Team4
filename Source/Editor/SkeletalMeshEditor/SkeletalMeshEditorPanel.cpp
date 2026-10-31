@@ -432,15 +432,3 @@ void FSkeletalMeshEditorPanel::DrawGizmoToolbar()
 		BoneGizmo.SetSpace(bLocal ? EGizmoSpace::World : EGizmoSpace::Local);
 	}
 }
-
-void FSkeletalMeshEditorPanel::DrawBones(FLineBatcher& LineBatcher) const
-{
-	for (int32 BoneIndex = 0; BoneIndex < PreviewPose.ComponentSpacePose.Num(); ++BoneIndex)
-	{
-		const int32 ParentIndex = ReferenceSkeleton.RefBoneInfo[BoneIndex].ParentIndex;
-		if (ParentIndex < 0) continue;
-		const FVector ParentLocation = PreviewPose.ComponentSpacePose[ParentIndex].GetOrigin();
-		const FVector4 Color = BoneIndex == SelectedBoneIndex ? FVector4{ 1.0f, 0.0f, 0.0f, 1.0f } : FVector4{ 1.0f, 1.0f, 1.0f, 1.0f };
-		LineBatcher.AddLine(ParentLocation, PreviewPose.ComponentSpacePose[BoneIndex].GetOrigin(), Color);
-	}
-}

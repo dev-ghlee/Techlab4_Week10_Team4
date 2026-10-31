@@ -12,6 +12,7 @@
 #include "Editor/Rendering/GridRenderer.h"
 #include "Editor/Gizmo/GizmoRenderer.h"
 #include "Editor/Gizmo/SceneComponentGizmoTarget.h"
+#include "Editor/SkeletalMeshEditor/BoneRenderer.h"
 #include "Render/LineBatcher.h"
 #include "Editor/Rendering/SceneDepthRenderer.h"
 #include "Editor/Rendering/CascadeFloorRenderer.h"
@@ -161,6 +162,7 @@ private:
 	TUniquePtr<FImGuiRenderer> ImGuiRenderer;
 	TUniquePtr<FGridRenderer> GridRenderer;
 	TUniquePtr<FGizmoRenderer> GizmoRenderer;
+	TUniquePtr<FBoneRenderer> BoneRenderer;
 	TUniquePtr<FTextRenderer> TextRenderer;
 	TUniquePtr<FLineBatcher> LineBatcher;
 	TUniquePtr<FOutline> Outline;

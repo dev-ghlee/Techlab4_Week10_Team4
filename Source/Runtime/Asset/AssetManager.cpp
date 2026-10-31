@@ -258,6 +258,12 @@ void UAssetManager::CreateDefaultMeshes()
 	FStaticMeshData* GizmoSphereData = FGeometryGenerator::GetMeshData("GizmoSphere");
 	RegisterAsset("GizmoSphere", CreateStaticMesh(GizmoSphereData));
 
+	FStaticMeshData* BoneSphereData = FGeometryGenerator::GetMeshData("BoneSphere");
+	RegisterAsset("BoneSphere", CreateStaticMesh(BoneSphereData));
+
+	FStaticMeshData* BoneOctahedronData = FGeometryGenerator::GetMeshData("BoneOctahedron");
+	RegisterAsset("BoneOctahedron", CreateStaticMesh(BoneOctahedronData));
+
 	const FParticleVertex Vertices[] =
 	{
 		{ FVector(0.0f, -0.5f,  0.5f), FVector2(0.0f, 0.0f) },

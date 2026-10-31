@@ -133,6 +133,9 @@ bool UEditorEngine::Init()
 
 	Gizmo = MakeUnique<FGizmo>();
 
+	BoneRenderer = MakeUnique<FBoneRenderer>();
+	BoneRenderer->Init(Renderer);
+
 	DetailsPanel = EditorUI->AddEditorPanel<FDetailsPanel>();
 	DetailsPanel->SetImGuiRenderer(ImGuiRenderer.get());
 	DetailsPanel->SetShadowPreviewQuery([this](const ULightComponent* Light, FTexture2DArray*& Atlas,
@@ -729,9 +732,11 @@ void UEditorEngine::RenderSkeletalMeshPreview()
 		{
 			Overlays.EditorLines = [this, &SceneView]
 				{
-					LineBatcher->BeginFrame();
-					SkeletalMeshEditorPanel->DrawBones(*LineBatcher);
-					LineBatcher->OnRender(SceneView.ViewProjectionMatrix);
+					BoneRenderer->OnRender(
+						SkeletalMeshEditorPanel->GetPreviewPose(),
+						SkeletalMeshEditorPanel->GetSelectedBoneIndex(),
+						SceneView.ViewProjectionMatrix,
+						SceneView.ViewLocation);
 				};
 
 			if (SettingsPanel->GetSettings().bDrawBatchLine)

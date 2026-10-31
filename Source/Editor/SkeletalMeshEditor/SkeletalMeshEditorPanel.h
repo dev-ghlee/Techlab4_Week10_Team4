@@ -6,6 +6,7 @@
 #include "Editor/Gizmo/Gizmo.h"
 #include "Editor/Viewports/EditorViewportClient.h"
 
+class FBoneRenderer;
 struct FEditorSettings;
 class UWorld;
 
@@ -17,8 +18,6 @@ public:
 	virtual void OnRender() override;
 	virtual const char* GetPanelName() const override { return "Skeletal Mesh Editor"; }
 
-	void DrawBones(FLineBatcher& LineBatcher) const;
-
 	UWorld* ReleasePreviewWorld();
 	UWorld* GetPreviewWorld() const { return PreviewWorld; }
 	FEditorViewportClient* GetViewportClient() { return &ViewportClient; }
@@ -26,6 +25,9 @@ public:
 	bool IsFocused() const { return IsOpen() && bFocused; }
 
 	const FGizmo& GetBoneGizmo() const { return BoneGizmo; }
+
+	const FSkeletalPose& GetPreviewPose() const { return PreviewPose; }
+	int32 GetSelectedBoneIndex() const { return SelectedBoneIndex; }
 
 private:
 	void TickCameraInput();
