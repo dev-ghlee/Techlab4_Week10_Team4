@@ -2,6 +2,8 @@
 
 #include "SkeletalTemp.h"
 #include "Editor/EditorUI/EditorPanel.h"
+#include "Editor/Gizmo/BoneGizmoTarget.h"
+#include "Editor/Gizmo/Gizmo.h"
 #include "Editor/Viewports/EditorViewportClient.h"
 
 struct FEditorSettings;
@@ -22,26 +24,29 @@ public:
 	FEditorViewportClient* GetViewportClient() { return &ViewportClient; }
 	void SetEditorSettings(const FEditorSettings* InSettings) { Settings = InSettings; }
 
-	const TArray<FMatrix>& GetComponentSpacePose() const { return ComponentSpacePose; }
-	const FReferenceSkeleton& GetReferenceSkeleton() const { return ReferenceSkeleton; }
+	const FGizmo& GetBoneGizmo() const { return BoneGizmo; }
 
 private:
 	void TickCameraInput();
 
 	void BuildDummySkeleton();
-	void ResetPose();
-	void UpdateComponentSpacePose();
 
 	void DrawViewport();
 	void DrawBoneTreeNode(int32 BoneIndex);
+
+	void SelectBone(int32 BoneIndex);
+	void TickBoneGizmo(const ImVec2& ViewportMin);
+	void DrawGizmoToolbar();
 
 	UWorld* PreviewWorld = nullptr;
 	FEditorViewportClient ViewportClient;
 	const FEditorSettings* Settings = nullptr;
 
+	FGizmo BoneGizmo;
+	FBoneGizmoTarget BoneGizmoTarget;
+
 	FReferenceSkeleton ReferenceSkeleton;
-	TArray<FTransform> LocalPose;
-	TArray<FMatrix> ComponentSpacePose;
+	FSkeletalPose PreviewPose;
 
 	TArray<TArray<int32>> Children;
 	int32 SelectedBoneIndex = -1;

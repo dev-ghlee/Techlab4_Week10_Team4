@@ -757,6 +757,18 @@ void UEditorEngine::RenderSkeletalMeshPreview()
 							ViewportSettings);
 					};
 			}
+
+			if (SkeletalMeshEditorPanel->GetBoneGizmo().GetTarget())
+			{
+				Overlays.EditorGizmo = [this, &SceneView]
+					{
+						GizmoRenderer->OnRender(
+							SkeletalMeshEditorPanel->GetBoneGizmo(),
+							SceneView.ViewProjectionMatrix,
+							SceneView.ViewLocation, 
+							!SceneView.bIsPerspective);
+					};
+			}
 			
 			Overlays.bClearEditorDepth = true;
 		});

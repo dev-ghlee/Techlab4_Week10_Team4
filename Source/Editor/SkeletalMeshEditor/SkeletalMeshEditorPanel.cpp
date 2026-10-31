@@ -106,6 +106,7 @@ namespace
 					{
 						Values[i] = ResetValue[i];
 					}
+					bVectorChanged = true;
 				}
 			}
 
@@ -114,6 +115,21 @@ namespace
 		ImGui::PopID();
 
 		return bVectorChanged;
+	}
+
+	bool DrawRotatorController(const FString& Label, FRotator& Rotator, const FRotator& ResetValue, float LabelWidth)
+	{
+		float Values[3] = { Rotator.Roll, Rotator.Pitch, Rotator.Yaw };
+		const float ResetValues[3] = { ResetValue.Roll, ResetValue.Pitch, ResetValue.Yaw };
+
+		const bool bChanged = DrawVector3Controller(Label, Values, ResetValues, LabelWidth);
+		if (bChanged)
+		{
+			Rotator.Roll = Values[0];
+			Rotator.Pitch = Values[1];
+			Rotator.Yaw = Values[2];
+		}
+		return bChanged;
 	}
 }
 
@@ -131,7 +147,7 @@ bool FSkeletalMeshEditorPanel::Init()
 
 void FSkeletalMeshEditorPanel::Tick(float DeltaTime)
 {
-	UpdateComponentSpacePose();
+	PreviewPose.UpdateComponentSpace();
 }
 
 void FSkeletalMeshEditorPanel::OnRender()
@@ -156,15 +172,15 @@ void FSkeletalMeshEditorPanel::OnRender()
 			{
 				ImGui::SeparatorText("Skeleton Tree");
 				DrawBoneTreeNode(0);
+
+				if (ImGui::IsWindowHovered() &&
+					!ImGui::IsAnyItemHovered() &&
+					ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+				{
+					SelectBone(-1);
+				}
 			}
 			ImGui::EndChild();
-
-			if (ImGui::IsWindowHovered() &&
-				!ImGui::IsAnyItemHovered() &&
-				ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-			{
-				SelectedBoneIndex = -1;
-			}
 
 			if (ImGui::BeginChild("##Details", ImVec2(0, 0), ImGuiChildFlags_Borders))
 			{
@@ -174,12 +190,12 @@ void FSkeletalMeshEditorPanel::OnRender()
 				{
 					ImGui::Text("Name: %s", ReferenceSkeleton.RefBoneInfo[SelectedBoneIndex].Name.ToString().c_str());
 
-					FVector& Location = LocalPose[SelectedBoneIndex].Location;
-					FRotator& Rotation = LocalPose[SelectedBoneIndex].Rotation;
-					FVector& Scale = LocalPose[SelectedBoneIndex].Scale;
+					FVector& Location = PreviewPose.LocalPose[SelectedBoneIndex].Location;
+					FRotator& Rotation = PreviewPose.LocalPose[SelectedBoneIndex].Rotation;
+					FVector& Scale = PreviewPose.LocalPose[SelectedBoneIndex].Scale;
 
 					DrawVector3Controller("Location", &Location[0], &ReferenceSkeleton.RefBonePoses[SelectedBoneIndex].Location[0], 90.0f);
-					DrawVector3Controller("Rotation", &Rotation[0], &ReferenceSkeleton.RefBonePoses[SelectedBoneIndex].Rotation[0], 90.0f);
+					DrawRotatorController("Rotation", Rotation, ReferenceSkeleton.RefBonePoses[SelectedBoneIndex].Rotation, 90.0f);
 					DrawVector3Controller("Scale", &Scale[0], &ReferenceSkeleton.RefBonePoses[SelectedBoneIndex].Scale[0], 90.0f);
 				}
 			}
@@ -210,7 +226,7 @@ void FSkeletalMeshEditorPanel::TickCameraInput()
 	}
 
 	const ImGuiIO& IO = ImGui::GetIO();
-	const bool bCaptured = ImGui::IsItemActive();
+	const bool bCaptured = ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Right) && !BoneGizmo.IsUsing();
 
 	FViewportCameraInput Input{
 		.bCaptured = bCaptured,
@@ -232,7 +248,7 @@ void FSkeletalMeshEditorPanel::TickCameraInput()
 void FSkeletalMeshEditorPanel::BuildDummySkeleton()
 {
 	ReferenceSkeleton = {};
-	ComponentSpacePose.Reset();
+	PreviewPose.LocalPose.Reset();
 
 	ReferenceSkeleton.RefBoneInfo.Emplace("Root", -1);
 	ReferenceSkeleton.RefBonePoses.Emplace(FTransform::Identity);
@@ -258,7 +274,8 @@ void FSkeletalMeshEditorPanel::BuildDummySkeleton()
 	ReferenceSkeleton.RefBoneInfo.Emplace("RightHand", 6);
 	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.5f, 0.0f });
 
-	ResetPose();
+	PreviewPose.Skeleton = &ReferenceSkeleton;
+	PreviewPose.Reset();
 
 	Children.SetNum(ReferenceSkeleton.RefBoneInfo.Num());
 	for (int32 BoneIndex = 0; BoneIndex < ReferenceSkeleton.RefBoneInfo.Num(); ++BoneIndex)
@@ -271,29 +288,10 @@ void FSkeletalMeshEditorPanel::BuildDummySkeleton()
 	}
 }
 
-void FSkeletalMeshEditorPanel::ResetPose()
-{
-	LocalPose = ReferenceSkeleton.RefBonePoses;
-}
-
-void FSkeletalMeshEditorPanel::UpdateComponentSpacePose()
-{
-	if (ComponentSpacePose.Num() != LocalPose.Num())
-	{
-		ComponentSpacePose.Reset();
-		ComponentSpacePose.SetNum(LocalPose.Num());
-	}
-
-	for (int32 BoneIndex = 0; BoneIndex < LocalPose.Num(); ++BoneIndex)
-	{
-		const int32 ParentIndex = ReferenceSkeleton.RefBoneInfo[BoneIndex].ParentIndex;
-		ComponentSpacePose[BoneIndex] = LocalPose[BoneIndex].GetLocalMatrix() *
-			(ParentIndex >= 0 ? ComponentSpacePose[ParentIndex] : FMatrix::Identity);
-	}
-}
-
 void FSkeletalMeshEditorPanel::DrawViewport()
 {
+	DrawGizmoToolbar();
+
 	const ImVec2 ViewportSize = ImGui::GetContentRegionAvail();
 	const uint32 Width = static_cast<uint32>(std::max(1.0f, ViewportSize.x));
 	const uint32 Height = static_cast<uint32>(std::max(1.0f, ViewportSize.y));
@@ -306,9 +304,10 @@ void FSkeletalMeshEditorPanel::DrawViewport()
 	{
 		const ImVec2 Min = ImGui::GetCursorScreenPos();
 		const ImVec2 Size(static_cast<float>(Width), static_cast<float>(Height));
-		ImGui::InvisibleButton("##PreviewViewport", Size, ImGuiButtonFlags_MouseButtonRight);
+		ImGui::InvisibleButton("##PreviewViewport", Size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
 		ImGui::GetWindowDrawList()->AddImage(ViewportClient.GetColorTarget()->GetSRV(), Min, ImVec2(Min.x + Size.x, Min.y + Size.y));
 		TickCameraInput();
+		TickBoneGizmo(Min);
 	}
 }
 
@@ -344,7 +343,7 @@ void FSkeletalMeshEditorPanel::DrawBoneTreeNode(int32 BoneIndex)
 
 	if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen())
 	{
-		SelectedBoneIndex = BoneIndex;
+		SelectBone(BoneIndex);
 	}
 	
 	if (bOpen && !bIsLeaf)
@@ -358,14 +357,73 @@ void FSkeletalMeshEditorPanel::DrawBoneTreeNode(int32 BoneIndex)
 	}
 }
 
+void FSkeletalMeshEditorPanel::SelectBone(int32 BoneIndex)
+{
+	SelectedBoneIndex = BoneIndex;
+	BoneGizmoTarget.SetBone(&PreviewPose, BoneIndex);
+	BoneGizmo.SetTarget(BoneIndex >= 0 ? &BoneGizmoTarget : nullptr);
+}
+
+void FSkeletalMeshEditorPanel::TickBoneGizmo(const ImVec2& ViewportMin)
+{
+	const ImGuiIO& IO = ImGui::GetIO();
+	const FVector2 LocalMouse(IO.MousePos.x - ViewportMin.x, IO.MousePos.y - ViewportMin.y);
+	const bool bMouseDown = ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left);
+
+	BoneGizmo.Update(
+		ViewportClient.DeprojectScreenToWorld(LocalMouse),
+		LocalMouse,
+		ViewportClient.GetViewProjectionMatrix(),
+		static_cast<int32>(ViewportClient.GetWidth()),
+		static_cast<int32>(ViewportClient.GetHeight()),
+		bMouseDown,
+		ViewportClient.GetViewLocation(),
+		!ViewportClient.IsPerspective()
+	);
+
+	if (ImGui::IsItemHovered() &&
+		ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+		!BoneGizmo.IsUsing() &&
+		BoneGizmo.GetHoveredAxis() < 0)
+	{
+		SelectBone(-1);
+	}
+}
+
+void FSkeletalMeshEditorPanel::DrawGizmoToolbar()
+{
+	const EGizmoMode Mode = BoneGizmo.GetMode();
+	if (ImGui::RadioButton("Location", Mode == EGizmoMode::Location))
+	{
+		BoneGizmo.SetMode(EGizmoMode::Location);
+	}
+	ImGui::SameLine();
+	if (ImGui::RadioButton("Rotation", Mode == EGizmoMode::Rotation))
+	{
+		BoneGizmo.SetMode(EGizmoMode::Rotation);
+	}
+	ImGui::SameLine();
+	if (ImGui::RadioButton("Scale", Mode == EGizmoMode::Scale))
+	{
+		BoneGizmo.SetMode(EGizmoMode::Scale);
+	}
+	ImGui::SameLine();
+
+	const bool bLocal = BoneGizmo.GetSpace() == EGizmoSpace::Local;
+	if (ImGui::Button(bLocal ? "Local" : "World"))
+	{
+		BoneGizmo.SetSpace(bLocal ? EGizmoSpace::World : EGizmoSpace::Local);
+	}
+}
+
 void FSkeletalMeshEditorPanel::DrawBones(FLineBatcher& LineBatcher) const
 {
-	for (int32 BoneIndex = 0; BoneIndex < ComponentSpacePose.Num(); ++BoneIndex)
+	for (int32 BoneIndex = 0; BoneIndex < PreviewPose.ComponentSpacePose.Num(); ++BoneIndex)
 	{
 		const int32 ParentIndex = ReferenceSkeleton.RefBoneInfo[BoneIndex].ParentIndex;
 		if (ParentIndex < 0) continue;
-		const FVector ParentLocation = ComponentSpacePose[ParentIndex].GetOrigin();
+		const FVector ParentLocation = PreviewPose.ComponentSpacePose[ParentIndex].GetOrigin();
 		const FVector4 Color = BoneIndex == SelectedBoneIndex ? FVector4{ 1.0f, 0.0f, 0.0f, 1.0f } : FVector4{ 1.0f, 1.0f, 1.0f, 1.0f };
-		LineBatcher.AddLine(ParentLocation, ComponentSpacePose[BoneIndex].GetOrigin(), Color);
+		LineBatcher.AddLine(ParentLocation, PreviewPose.ComponentSpacePose[BoneIndex].GetOrigin(), Color);
 	}
 }
