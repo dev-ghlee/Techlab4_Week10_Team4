@@ -34,7 +34,7 @@ public:
 
 private:
 	void TickCameraInput();
-	void TickGizmoShortcut();
+	void TickShortcut();
 
 	void BuildDummySkeleton();
 
@@ -45,6 +45,10 @@ private:
 	int32 PickBone(const FVector2& MousePosition);
 	void TickBoneGizmo(const ImVec2& ViewportMin);
 	void DrawGizmoToolbar();
+
+	void CommitUndo();
+	void Undo();
+	void Redo();
 
 	UWorld* PreviewWorld = nullptr;
 	FEditorViewportClient ViewportClient;
@@ -64,4 +68,15 @@ private:
 
 	TArray<TArray<int32>> Children;
 	int32 SelectedBoneIndex = -1;
+	
+	struct FBoneChange
+	{
+		int32 BoneIndex;
+		FTransform Before;
+		FTransform After;
+	};
+	TArray<FBoneChange> UndoStack;
+	TArray<FBoneChange> RedoStack;
+	TArray<FTransform> LastSnapshot;
+	bool bWasAnyItemActive = false;
 };

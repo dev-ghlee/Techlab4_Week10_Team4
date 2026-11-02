@@ -22,4 +22,14 @@ struct FTransform
 	FVector Location = FVector(0, 0, 0);
 	FVector Scale = FVector(1, 1, 1);
 	FRotator Rotation = FRotator(0, 0, 0);
+
+	bool operator==(const FTransform& Other) const
+	{
+		return Location == Other.Location && Scale == Other.Scale && Rotation == Other.Rotation;
+	}
+
+	bool operator!=(const FTransform& Other) const
+	{
+		return !(*this == Other);
+	}
 };

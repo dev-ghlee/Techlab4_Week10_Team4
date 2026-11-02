@@ -157,7 +157,7 @@ void FSkeletalMeshEditorPanel::OnRender()
 	if (ImGui::Begin(GetPanelName(), &bPanelOpen))
 	{
 		SetOpen(bPanelOpen);
-		TickGizmoShortcut();
+		TickShortcut();
 
 		if (ImGui::BeginTable("##SkeletalMeshEditorLayout", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV))
 		{
@@ -208,6 +208,13 @@ void FSkeletalMeshEditorPanel::OnRender()
 	}
 
 	ImGui::End();
+
+	const bool bAnyItemActive = ImGui::IsAnyItemActive();
+	if (bWasAnyItemActive && !bAnyItemActive)
+	{
+		CommitUndo();
+	}
+	bWasAnyItemActive = bAnyItemActive;
 }
 
 UWorld* FSkeletalMeshEditorPanel::ReleasePreviewWorld()
@@ -247,10 +254,12 @@ void FSkeletalMeshEditorPanel::TickCameraInput()
 	ViewportClient.ApplyCameraInput(Input, IO.DeltaTime, 2.0f * Settings->CameraSpeed, 0.2f * Settings->MouseSensitivity);
 }
 
-void FSkeletalMeshEditorPanel::TickGizmoShortcut()
+void FSkeletalMeshEditorPanel::TickShortcut()
 {
+	const ImGuiIO& IO = ImGui::GetIO();
+
 	bFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-	if (!bFocused || ImGui::GetIO().WantTextInput || BoneGizmo.IsUsing())
+	if (!bFocused || IO.WantTextInput || BoneGizmo.IsUsing() || ImGui::IsAnyItemActive())
 	{
 		return;
 	}
@@ -259,6 +268,15 @@ void FSkeletalMeshEditorPanel::TickGizmoShortcut()
 	{
 		const int NextMode = (static_cast<int>(BoneGizmo.GetMode()) + 1) % 3;
 		BoneGizmo.SetMode(static_cast<EGizmoMode>(NextMode));
+	}
+
+	if (IO.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z))
+	{
+		IO.KeyShift ? Redo() : Undo();
+	}
+	else if (IO.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y))
+	{
+		Redo();
 	}
 }
 
@@ -303,6 +321,8 @@ void FSkeletalMeshEditorPanel::BuildDummySkeleton()
 			Children[ParentIndex].Add(BoneIndex);
 		}
 	}
+
+	LastSnapshot = PreviewPose.LocalPose;
 }
 
 void FSkeletalMeshEditorPanel::DrawViewport()
@@ -573,4 +593,55 @@ void FSkeletalMeshEditorPanel::DrawGizmoToolbar()
 	ImGui::Checkbox("Mesh", &bRenderMesh);
 	ImGui::SameLine();
 	ImGui::Checkbox("Bones", &bRenderBones);
+}
+
+void FSkeletalMeshEditorPanel::CommitUndo()
+{
+	bool bChanged = false;
+	for (int32 Index = 0; Index < PreviewPose.LocalPose.Num(); ++Index)
+	{
+		if (PreviewPose.LocalPose[Index] != LastSnapshot[Index])
+		{
+			FBoneChange Change;
+			Change.BoneIndex = Index;
+			Change.Before = LastSnapshot[Index];
+			Change.After = PreviewPose.LocalPose[Index];
+			UndoStack.Push(Change);
+			LastSnapshot[Index] = PreviewPose.LocalPose[Index];
+			bChanged = true;
+		}
+	}
+	
+	if (bChanged)
+	{
+		RedoStack.Reset();
+	}
+}
+
+void FSkeletalMeshEditorPanel::Undo()
+{
+	if (UndoStack.Num() > 0)
+	{
+		const FBoneChange Change = UndoStack.Last();
+		UndoStack.Pop();
+		
+		PreviewPose.LocalPose[Change.BoneIndex] = Change.Before;
+		RedoStack.Push(Change);
+
+		LastSnapshot[Change.BoneIndex] = Change.Before;
+	}
+}
+
+void FSkeletalMeshEditorPanel::Redo()
+{
+	if (RedoStack.Num() > 0)
+	{
+		const FBoneChange Change = RedoStack.Last();
+		RedoStack.Pop();
+		
+		PreviewPose.LocalPose[Change.BoneIndex] = Change.After;
+		UndoStack.Push(Change);
+
+		LastSnapshot[Change.BoneIndex] = Change.After;
+	}
 }
