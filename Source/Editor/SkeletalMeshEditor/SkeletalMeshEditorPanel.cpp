@@ -381,11 +381,128 @@ void FSkeletalMeshEditorPanel::SelectBone(int32 BoneIndex)
 	BoneGizmo.SetTarget(BoneIndex >= 0 ? &BoneGizmoTarget : nullptr);
 }
 
+int32 FSkeletalMeshEditorPanel::PickBone(const FVector2& MousePosition)
+{
+	constexpr float JointRadiusRatio = 0.07f;
+	constexpr float DefaultJointRadius = 0.05f;
+
+	TArray<float> JointRadii;
+	JointRadii.SetNum(PreviewPose.LocalPose.Num());
+	for (float& Radius : JointRadii)
+	{
+		Radius = FLT_MAX;
+	}
+
+	for (int32 Index = 0; Index < PreviewPose.LocalPose.Num(); ++Index)
+	{
+		const int32 ParentIndex = PreviewPose.Skeleton->RefBoneInfo[Index].ParentIndex;
+		if (ParentIndex < 0)
+		{
+			continue;
+		}
+
+		const FVector Delta = PreviewPose.ComponentSpacePose[Index].GetOrigin() - PreviewPose.ComponentSpacePose[ParentIndex].GetOrigin();
+		const float Radius = Delta.Length() * JointRadiusRatio;
+		if (Radius < KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		JointRadii[Index] = std::min(JointRadii[Index], Radius);
+		JointRadii[ParentIndex] = std::min(JointRadii[ParentIndex], Radius);
+	}
+
+	for (float& Radius : JointRadii)
+	{
+		if (Radius == FLT_MAX)
+		{
+			Radius = DefaultJointRadius;
+		}
+	}
+
+	const auto& Pose = PreviewPose.ComponentSpacePose;
+	const FMatrix ViewProjection = ViewportClient.GetViewProjectionMatrix();
+	const FVector CameraRight = ViewportClient.GetViewRotation().Quaternion().GetRightVector();
+	const int32 Width = static_cast<int32>(ViewportClient.GetWidth());
+	const int32 Height = static_cast<int32>(ViewportClient.GetHeight());
+
+	const auto GetHitRadius = [&](const FVector& WorldLocation, const FVector2& ScreenLocation, float WorldRadius) -> float
+		{
+			constexpr float MinHitPixels = 6.0f;
+			const FVector2 Edge = WorldToScreen(WorldLocation + CameraRight * WorldRadius, ViewProjection, Width, Height);
+			const float HitPixels = (Edge - ScreenLocation).Length();
+			return std::max(HitPixels, MinHitPixels);
+		};
+
+	TArray<FVector2> ScreenJoints;
+	ScreenJoints.SetNum(Pose.Num());
+	for (int32 Index = 0; Index < Pose.Num(); ++Index)
+	{
+		ScreenJoints[Index] = WorldToScreen(Pose[Index].GetOrigin(), ViewProjection, Width, Height);
+	}
+
+	// Joint
+	float MinDistance = FLT_MAX;
+	int32 PickedJoint = -1;
+	for (int32 Index = 0; Index < Pose.Num(); ++Index)
+	{
+		if (ScreenJoints[Index].X == -FLT_MAX)
+		{
+			continue;
+		}
+		
+		const float Distance = (MousePosition - ScreenJoints[Index]).Length();
+		const float HitRadius = GetHitRadius(Pose[Index].GetOrigin(), ScreenJoints[Index], JointRadii[Index]);
+		if (Distance <= HitRadius && Distance < MinDistance)
+		{
+			MinDistance = Distance;
+			PickedJoint = Index;
+		}
+	}
+	if (PickedJoint >= 0)
+	{
+		return PickedJoint;
+	}
+
+	// Bone
+	MinDistance = FLT_MAX;
+	int32 PickedBone = -1;
+	for (int32 Index = 0; Index < Pose.Num(); ++Index)
+	{
+		const int32 ParentIndex = ReferenceSkeleton.RefBoneInfo[Index].ParentIndex;
+		if (ParentIndex < 0 || ScreenJoints[Index].X == -FLT_MAX || ScreenJoints[ParentIndex].X == -FLT_MAX)
+		{
+			continue;
+		}
+
+		const FVector ParentLocation = Pose[ParentIndex].GetOrigin();
+		const FVector ChildLocation = Pose[Index].GetOrigin();
+		const FVector Middle = (ParentLocation + ChildLocation) * 0.5f;
+		const float WorldRadius = (ChildLocation - ParentLocation).Length() * 0.1f;
+
+		const float Distance = DistanceToSegment(MousePosition, ScreenJoints[ParentIndex], ScreenJoints[Index]);
+		const float HitRadius = GetHitRadius(Middle, WorldToScreen(Middle, ViewProjection, Width, Height), WorldRadius);
+		if (Distance <= HitRadius && Distance < MinDistance)
+		{
+			MinDistance = Distance;
+			PickedBone = ParentIndex;
+		}
+	}
+
+	return PickedBone;
+}
+
 void FSkeletalMeshEditorPanel::TickBoneGizmo(const ImVec2& ViewportMin)
 {
 	const ImGuiIO& IO = ImGui::GetIO();
 	const FVector2 LocalMouse(IO.MousePos.x - ViewportMin.x, IO.MousePos.y - ViewportMin.y);
-	const bool bMouseDown = ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left);
+
+	if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+	{
+		bJustPicked = false;
+	}
+
+	const bool bMouseDown = ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left) && !bJustPicked;
 
 	BoneGizmo.Update(
 		ViewportClient.DeprojectScreenToWorld(LocalMouse),
@@ -403,7 +520,12 @@ void FSkeletalMeshEditorPanel::TickBoneGizmo(const ImVec2& ViewportMin)
 		!BoneGizmo.IsUsing() &&
 		BoneGizmo.GetHoveredAxis() < 0)
 	{
-		SelectBone(-1);
+		int32 PickedBone = PickBone(LocalMouse);
+		if (PickedBone >= 0)
+		{
+			bJustPicked = true;
+		}
+		SelectBone(PickedBone);
 	}
 }
 

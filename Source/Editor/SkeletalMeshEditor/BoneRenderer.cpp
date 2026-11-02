@@ -43,7 +43,7 @@ bool FBoneRenderer::Init(FRenderer* InRenderer)
 	PipelineState.Shader = Shader;
 	PipelineState.Topology = EPrimitiveTopology::TriangleList;
 
-	return false;
+	return true;
 }
 
 void FBoneRenderer::OnRender(const FSkeletalPose& Pose, int32 SelectedBoneIndex, const FMatrix& ViewProjection, const FVector& CameraLocation)

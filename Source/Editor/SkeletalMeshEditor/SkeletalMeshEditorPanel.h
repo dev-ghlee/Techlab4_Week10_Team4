@@ -6,7 +6,6 @@
 #include "Editor/Gizmo/Gizmo.h"
 #include "Editor/Viewports/EditorViewportClient.h"
 
-class FBoneRenderer;
 struct FEditorSettings;
 class UWorld;
 
@@ -39,6 +38,7 @@ private:
 	void DrawBoneTreeNode(int32 BoneIndex);
 
 	void SelectBone(int32 BoneIndex);
+	int32 PickBone(const FVector2& MousePosition);
 	void TickBoneGizmo(const ImVec2& ViewportMin);
 	void DrawGizmoToolbar();
 
@@ -46,6 +46,7 @@ private:
 	FEditorViewportClient ViewportClient;
 	const FEditorSettings* Settings = nullptr;
 	bool bFocused = false;
+	bool bJustPicked = false;
 
 	FGizmo BoneGizmo;
 	FBoneGizmoTarget BoneGizmoTarget;
