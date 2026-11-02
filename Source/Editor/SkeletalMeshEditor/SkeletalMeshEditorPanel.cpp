@@ -553,4 +553,22 @@ void FSkeletalMeshEditorPanel::DrawGizmoToolbar()
 	{
 		BoneGizmo.SetSpace(bLocal ? EGizmoSpace::World : EGizmoSpace::Local);
 	}
+	ImGui::SameLine();
+	
+	const ImGuiStyle& Style = ImGui::GetStyle();
+	const auto GetCheckboxWidth = [&](const char* Label)
+		{
+			return ImGui::GetFrameHeight() + Style.ItemInnerSpacing.x + ImGui::CalcTextSize(Label, nullptr, true).x;
+		};
+
+	const float ButtonsWidth = GetCheckboxWidth("Mesh") + Style.ItemSpacing.x + GetCheckboxWidth("Bones");
+	const float Offset = ImGui::GetContentRegionAvail().x - ButtonsWidth;
+	if (Offset > 0.0f)
+	{
+		ImGui::SetCursorPosX(ImGui::GetCursorPosX() + Offset);
+	}
+
+	ImGui::Checkbox("Mesh", &bRenderMesh);
+	ImGui::SameLine();
+	ImGui::Checkbox("Bones", &bRenderBones);
 }

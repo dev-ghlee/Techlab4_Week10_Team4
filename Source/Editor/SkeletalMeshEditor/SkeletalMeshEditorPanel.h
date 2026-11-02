@@ -25,6 +25,9 @@ public:
 
 	const FGizmo& GetBoneGizmo() const { return BoneGizmo; }
 
+	bool IsRenderMesh() const { return bRenderMesh; }
+	bool IsRenderBones() const { return bRenderBones; }
+
 	const FSkeletalPose& GetPreviewPose() const { return PreviewPose; }
 	int32 GetSelectedBoneIndex() const { return SelectedBoneIndex; }
 
@@ -50,6 +53,9 @@ private:
 
 	FGizmo BoneGizmo;
 	FBoneGizmoTarget BoneGizmoTarget;
+
+	bool bRenderMesh = true;
+	bool bRenderBones = true;
 
 	FReferenceSkeleton ReferenceSkeleton;
 	FSkeletalPose PreviewPose;

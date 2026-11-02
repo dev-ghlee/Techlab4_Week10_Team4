@@ -732,11 +732,18 @@ void UEditorEngine::RenderSkeletalMeshPreview()
 		{
 			Overlays.EditorLines = [this, &SceneView]
 				{
-					BoneRenderer->OnRender(
-						SkeletalMeshEditorPanel->GetPreviewPose(),
-						SkeletalMeshEditorPanel->GetSelectedBoneIndex(),
-						SceneView.ViewProjectionMatrix,
-						SceneView.ViewLocation);
+					if (SkeletalMeshEditorPanel->IsRenderMesh())
+					{
+						// TODO: 스킨 메시 그리는 코드...
+					}
+					if (SkeletalMeshEditorPanel->IsRenderBones())
+					{
+						BoneRenderer->OnRender(
+							SkeletalMeshEditorPanel->GetPreviewPose(),
+							SkeletalMeshEditorPanel->GetSelectedBoneIndex(),
+							SceneView.ViewProjectionMatrix,
+							SceneView.ViewLocation);
+					}
 				};
 
 			if (SettingsPanel->GetSettings().bDrawBatchLine)
