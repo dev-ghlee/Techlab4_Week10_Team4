@@ -746,7 +746,7 @@ void UEditorEngine::RenderSkeletalMeshPreview()
 					}
 				};
 
-			if (SettingsPanel->GetSettings().bDrawBatchLine)
+			if (SkeletalMeshEditorPanel->IsRenderGrid())
 			{
 				const FViewportSettings ViewportSettings
 				{

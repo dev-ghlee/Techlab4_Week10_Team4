@@ -25,6 +25,7 @@ public:
 
 	const FGizmo& GetBoneGizmo() const { return BoneGizmo; }
 
+	bool IsRenderGrid() const { return bRenderGrid; }
 	bool IsRenderMesh() const { return bRenderMesh; }
 	bool IsRenderBones() const { return bRenderBones; }
 
@@ -54,6 +55,7 @@ private:
 	FGizmo BoneGizmo;
 	FBoneGizmoTarget BoneGizmoTarget;
 
+	bool bRenderGrid = false;
 	bool bRenderMesh = true;
 	bool bRenderBones = true;
 
