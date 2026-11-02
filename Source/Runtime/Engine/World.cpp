@@ -432,7 +432,7 @@ void UWorld::GatherRenderPackets(FRenderQueue& RenderQueue, const FViewContext* 
 				}
 				else
 				{
-					Primitive->SubmitToRenderQueue(RenderQueue, LODView ? *LODView : FViewContext{});
+					Proxy->GatherMeshElements(RenderQueue, LODView ? *LODView : FViewContext{});
 				}
 
 				// continue 없이 항상 여기까지 와서 새 패킷에 여유 칸을 배정한다.

@@ -46,6 +46,9 @@ public:
 
 	virtual void BeginPlay() override;
 
+	// 컴포넌트 종류에 맞는 렌더링용 Proxy를 생성한다.
+	virtual FPrimitiveSceneProxy* CreateSceneProxy();
+
 	// Todo: subuv
 	//void SubmitToRenderQueue(TQueue<FRenderPacket>& RenderQueue);
 	virtual void SubmitToRenderQueue(FRenderQueue& RenderQueue, const FViewContext& ViewContext);

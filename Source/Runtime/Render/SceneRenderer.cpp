@@ -1053,7 +1053,7 @@ void FSceneRenderer::GatherRenderPackets(FScene& Scene, FSceneRenderData& Data,
 				}
 				else
 				{
-					Primitive->SubmitToRenderQueue(RenderQueue, View);
+					Proxy->GatherMeshElements(RenderQueue, View);
 				}
 
 				// continue 없이 항상 여기까지 와서 새 패킷에 여유 칸을 배정한다.
@@ -1062,7 +1062,7 @@ void FSceneRenderer::GatherRenderPackets(FScene& Scene, FSceneRenderData& Data,
 					if (!bPrepareObjectSlots || NextExtraSlot >= MaxSlots) break;
 					FRenderPacket& Packet = RenderQueue[p];
 					const FMatrix& Model = Packet.Proxy ? Packet.Proxy->GetLocalToWorld() : Packet.Model ? *Packet.Model : FMatrix::Identity;
-					Data.ObjectConstants[NextExtraSlot] = MakePerObjectConstants(Model);
+					Data.ObjectConstants[NextExtraSlot] = MakePerObjectConstants(Model, !Packet.Proxy || Packet.Proxy->bReceiveShadow);
 					Packet.Slot = NextExtraSlot++;
 				}
 			}

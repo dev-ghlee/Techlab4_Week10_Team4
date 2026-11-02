@@ -120,6 +120,11 @@ void UPrimitiveComponent::SetReceiveShadow(bool NewValue)
 	}
 }
 
+FPrimitiveSceneProxy* UPrimitiveComponent::CreateSceneProxy()
+{
+	return new FPrimitiveSceneProxy(this);
+}
+
 void UPrimitiveComponent::CreateRenderState()
 {
 	Super::CreateRenderState();

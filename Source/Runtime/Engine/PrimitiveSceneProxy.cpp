@@ -34,9 +34,35 @@ void FPrimitiveSceneProxy::UpdateTransform()
 {
     LocalToWorld = Component->GetWorldMatrix();
     WorldToLocal = LocalToWorld.Inverse();
-    const FBox LocalBounds = Mesh ? Mesh->GetRenderBounds() : Component->CalcLocalBounds();
+    const FBox LocalBounds = GetLocalBounds();
     Bounds = MakeWorldBounds(LocalBounds.GetWorldAABB(LocalToWorld));
-    LODSphere = Mesh ? Mesh->GetLocalLODSphere().Transform(LocalToWorld) : FLODSphere{};
+    if (Mesh)
+    {
+        LODSphere = Mesh->GetLocalLODSphere().Transform(LocalToWorld);
+    }
+    else
+    {
+        FLODSphere LocalSphere;
+        LocalSphere.Center = (LocalBounds.Min + LocalBounds.Max) * 0.5f;
+        LocalSphere.RadiusSquared = (LocalBounds.Max - LocalSphere.Center).SizeSquared();
+        LODSphere = LocalSphere.Transform(LocalToWorld);
+    }
+}
+
+FBox FPrimitiveSceneProxy::GetLocalBounds() const
+{
+    return Mesh ? Mesh->GetRenderBounds() : Component->CalcLocalBounds();
+}
+
+FMeshGeometry FPrimitiveSceneProxy::GetGeometry(uint32 LODIndex) const
+{
+    return Mesh ? Mesh->GetGeometry(LODIndex) : FMeshGeometry{};
+}
+
+void FPrimitiveSceneProxy::GatherMeshElements(FRenderQueue& Queue, const FViewContext& View) const
+{
+    // 기존 빌보드/파티클 제출은 유지하고, 스켈레탈 Proxy는 이 함수를 재정의한다.
+    Component->SubmitToRenderQueue(Queue, View);
 }
 
 void FPrimitiveSceneProxy::UpdateRenderState()
