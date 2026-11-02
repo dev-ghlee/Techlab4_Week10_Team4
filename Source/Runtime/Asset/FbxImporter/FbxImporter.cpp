@@ -2,6 +2,8 @@
 #include "FbxImporter.h"
 
 #include "Containers/Array.h"
+#include "Containers/Map.h"
+#include "Render/SkeletalMeshData.h"
 
 #include <fbxsdk.h>
 
@@ -28,6 +30,12 @@ struct FImportContext
 
 	// 각 Mesh Node에 연결된 Skin과 Cluster 정보.
 	TArray<FFbxSkinCluster> SkinClusters;
+
+	// 부모부터 자식 순서로 저장한 SDK Node 목록.
+	TArray<FbxNode*> BoneNodes;
+
+	// SDK Node와 엔진 본 인덱스의 대응 관계.
+	TMap<FbxNode*, int32> BoneIndexMap;
 };
 
 bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FString& OutError)
@@ -217,7 +225,70 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		}
 	}
 
-	// 이후 여기에 본과 메시 등의 데이터 추출을 추가한다.
+	FbxNode* SceneRoot = Scene->GetRootNode();
+	for (const FFbxSkinCluster& SkinCluster : Context.SkinClusters)
+	{
+		// 연결 본에서 시작해 아직 등록되지 않은 조상들을 모은다.
+		TArray<FbxNode*> BoneChain;
+		FbxNode* Node = SkinCluster.Cluster->GetLink();
+
+		while (Node && Node != SceneRoot)
+		{
+			// 이미 등록된 본은 부모들도 먼저 등록된 상태다.
+			if (Context.BoneIndexMap.Contains(Node))
+			{
+				break;
+			}
+
+			BoneChain.Add(Node);
+
+			// 부모로 올라가며 필요한 조상을 수집한다.
+			Node = Node->GetParent();
+		}
+
+		// 자식부터 모았으므로 역순으로 등록하면 부모가 먼저 온다.
+		for (int32 ChainIndex = BoneChain.Num() - 1; ChainIndex >= 0; --ChainIndex)
+		{
+			FbxNode* BoneNode = BoneChain[ChainIndex];
+			const int32 BoneIndex = Context.BoneNodes.Num();
+
+			Context.BoneNodes.Add(BoneNode);
+			Context.BoneIndexMap.Add(BoneNode, BoneIndex);
+		}
+	}
+
+	// 최종 결과를 조립할 임시 데이터.
+	// 모든 추출이 성공한 뒤에만 OutData로 이동한다.
+	FSkeletalMeshData ImportedData;
+
+	for (FbxNode* BoneNode : Context.BoneNodes)
+	{
+		FMeshBoneInfo BoneInfo;
+		BoneInfo.Name = FName(BoneNode->GetName());
+
+		FbxNode* ParentNode = BoneNode->GetParent();
+
+		// SceneRoot는 본 목록에서 제외했으므로 부모 인덱스를 연결하지 않는다.
+		// 부모가 없는 경우도 기본값 -1을 유지한다.
+		if (ParentNode && ParentNode != SceneRoot)
+		{
+			const int32* ParentIndex = Context.BoneIndexMap.Find(ParentNode);
+
+			// 필요한 조상은 앞선 목록 구성에서 모두 등록되어 있어야 한다.
+			if (!ParentIndex)
+			{
+				OutError = "Failed to resolve the parent bone index.";
+				return false;
+			}
+
+			BoneInfo.ParentIndex = *ParentIndex;
+		}
+
+		// BoneNodes와 같은 순서로 저장해 본 인덱스를 유지한다.
+		ImportedData.RefSkeleton.RawRefBoneInfo.Add(BoneInfo);
+	}
+
+	// 이후 여기에 공통 메시 공간, 기준 포즈와 메시 등의 추출을 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
 
