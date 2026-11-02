@@ -7,7 +7,8 @@ class UBoxComponent;
 
 struct FWorldSphere { FVector Center; float Radius; };
 struct FWorldCapsule { FVector A; FVector B; float Radius; }; // A·B = 위·아래 반구 중심
-struct FWorldBox { FVector Center; FVector Axis[3]; FVector Extent; };  // Axis는 정규화된 회전축
+struct FWorldBox;
+//struct FWorldBox { FVector Center; FVector Axis[3]; FVector Extent; };
  
 // 도형 간 교차 판정. 담당: D, 소비자: C (UWorld::UpdateOverlaps)
 namespace FCollision

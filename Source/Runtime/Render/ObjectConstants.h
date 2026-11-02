@@ -47,3 +47,11 @@ static_assert(sizeof(FForwardObjectConstants) == 272);
 static_assert(sizeof(FForwardMaterialConstants) == 80);
 static_assert(offsetof(FForwardMaterialConstants, SpecularColorShininess) == 64);
 
+struct FDecalConstants
+{
+	FMatrix DecalViewProjection;
+	FVector4 DecalColor;
+	FVector4 DecalForward;
+};
+
+static_assert(sizeof(FDecalConstants) == 96);

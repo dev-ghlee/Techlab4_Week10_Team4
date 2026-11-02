@@ -20,6 +20,9 @@
 #include "Render/PostProcess/ToneMapData.h"
 #include "Text/TextRenderer.h"
 #include "UObject/UObjectIterator.h"
+#include "Math/Box.h"
+#include "Components/DecalComponent.h"
+#include "Physics/Collision.h"
 
 #include <cmath>
 #include <algorithm>
@@ -151,6 +154,179 @@ void FSceneRenderer::RenderSceneText(FRenderer* Renderer)
 }
 
 // 가시성 검사 및 렌더 큐 수집
+void FSceneRenderer::CollectDecalReceivers(const FDecalSceneProxy* Decal, TArray<FPrimitiveSceneProxy*>& OutReceivers)
+{
+	if(!World || !Decal)
+	{
+		return;
+	}
+
+	World->GetScene().BVH.Query(
+		[ & ](const FBox& Bounds)
+		{
+			return Decal->WorldBounds.Intersects(Bounds);
+		},
+		[ & ](FPrimitiveSceneProxy* Proxy)
+		{
+			if(!Proxy || !Proxy->IsReceivesDecals())
+			{
+				return;
+			}
+
+			const FAABB& B = Proxy->GetBounds();
+			FWorldBox MeshBox;
+			MeshBox.Center = B.Center;
+			MeshBox.Extent = B.Extent;
+			MeshBox.Axis[0] = FVector(1.0f, 0.0f, 0.0f);
+			MeshBox.Axis[1] = FVector(0.0f, 1.0f, 0.0f);
+			MeshBox.Axis[2] = FVector(0.0f, 0.0f, 1.0f);
+
+			if(FCollision::BoxBox(MeshBox, Decal->WorldOBB))
+			{
+				OutReceivers.Add(Proxy);
+			}
+		}
+	);
+}
+
+bool FSceneRenderer::AddDecalPass(FRenderGraphBuilder& Graph, FRenderer* Renderer, FSceneViewTargets& Targets, const FSceneRenderOptions& Options)
+{
+	if(!World || !Renderer)
+	{
+		return false;
+	}
+
+	FScene& Scene = World->GetScene();
+	const auto& Decals = Scene.GetDecalProxies();
+
+	const FRenderGraphTextureRef SceneColor = Graph.ImportTexture(Targets.SceneColor.get(), "SceneColor");
+	const FRenderGraphTextureRef Depth = Graph.ImportTexture(Targets.Depth.get(), "SceneDepth");
+	if(!SceneColor || !Depth)
+	{
+		return false;
+	}
+
+	FRenderGraphRasterPassDesc PassDesc = MakeViewportPass("DecalPass", SceneColor, Depth);
+
+	return Graph.AddRasterPass(std::move(PassDesc), [ this, Renderer ]()
+		{
+			RenderDecals(Renderer);
+		});
+}
+
+void FSceneRenderer::RenderDecals(FRenderer* Renderer)
+{
+	if(!World || !Renderer)
+	{
+		return;
+	}
+
+	FScene& Scene = World->GetScene();
+	const auto& AllDecals = Scene.GetDecalProxies();
+
+	TArray<const FDecalSceneProxy*> ActiveDecals;
+	for(const FDecalSceneProxy* Decal : AllDecals)
+	{
+		if(Decal && Decal->DrawInGame)
+		{
+			ActiveDecals.Add(Decal);
+		}
+	}
+
+	if(ActiveDecals.IsEmpty())
+	{
+		return;
+	}
+
+	std::sort(ActiveDecals.begin(), ActiveDecals.end(),
+		[](const FDecalSceneProxy* A, const FDecalSceneProxy* B)
+		{
+			return A->SortOrder < B->SortOrder;
+		});
+
+	static FPipelineState DecalPipeline;
+	static bool bPipelineInitialized = false;
+	if(!bPipelineInitialized)
+	{
+		DecalPipeline.Shader = FRenderResourceManager::GetShaderProgram("Resources/Shader/ForwardDecal.hlsl");
+		DecalPipeline.Topology = EPrimitiveTopology::TriangleList;
+		DecalPipeline.RasterizerState = ERasterizerState::SolidBack;
+		DecalPipeline.BlendState = EBlendState::AlphaBlend;
+		DecalPipeline.DepthStencilState = EDepthStencilState::ReadOnly;
+		bPipelineInitialized = true;
+	}
+	if(!DecalPipeline.Shader || !DecalPipeline.Shader->VertexShader || !DecalPipeline.Shader->PixelShader)
+	{
+		return;
+	}
+	RenderCommand::BindPipelineState(DecalPipeline);
+
+	Renderer->UploadViewMatrix(View.ViewProjectionMatrix);
+	RenderCommand::BindConstantBuffer(1, Renderer->GetViewConstants(), EShaderBindFlagBits::Vertex);
+
+	RenderCommand::BindSamplerState(0, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel);
+
+	FConstantBuffer* DecalCB = Renderer->GetDecalConstants();
+	FConstantBuffer* ObjectCB = Renderer->GetObjectConstants();
+	if(!DecalCB || !ObjectCB)
+	{
+		return;
+	}
+
+	TArray<FPrimitiveSceneProxy*> Receivers;
+	for(const FDecalSceneProxy* Decal : ActiveDecals)
+	{
+		Receivers.Reset();
+		CollectDecalReceivers(Decal, Receivers);
+
+		if(Receivers.IsEmpty())
+		{
+			continue;
+		}
+
+		FDecalConstants DecalData;
+		DecalData.DecalViewProjection = Decal->DecalViewProjection;
+		DecalData.DecalColor = Decal->DecalColor.ToVector4();
+		FVector DecalForward = FVector(Decal->DecalToWorld.M[0][0], Decal->DecalToWorld.M[0][1], Decal->DecalToWorld.M[0][2]).Normalized();
+		DecalData.DecalForward = FVector4(DecalForward, 0.0f);
+
+		RenderCommand::UpdateBufferData(DecalCB, &DecalData, sizeof(DecalData));
+		RenderCommand::BindConstantBuffer(2, DecalCB, EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
+
+		if(Decal->DecalMaterial && !Decal->DecalMaterial->Textures.IsEmpty())
+		{
+			RenderCommand::BindShaderResource(0, Decal->DecalMaterial->Textures[0], EShaderBindFlagBits::Pixel);
+		}
+		else
+		{
+			RenderCommand::BindShaderResource(0, static_cast<UTexture2D*>(nullptr), EShaderBindFlagBits::Pixel);
+		}
+
+		for(FPrimitiveSceneProxy* Receiver : Receivers)
+		{
+			UStaticMesh* Mesh = Receiver->GetMesh();
+			if(!Mesh)
+			{
+				continue;
+			}
+
+			FMatrix LocalToWorld = Receiver->GetLocalToWorld();
+			RenderCommand::UpdateBufferData(ObjectCB, &LocalToWorld, sizeof(FMatrix));
+			RenderCommand::BindConstantBuffer(0, ObjectCB, EShaderBindFlagBits::Vertex);
+
+			RenderCommand::BindMesh(Mesh, 0);
+
+			const auto& Sections = Mesh->GetMeshData().Sections;
+			for(const auto& Section : Sections)
+			{			
+				RenderCommand::DrawIndexed(Section.IndexCount,Section.StartIndex);
+			}
+		}
+	}
+
+	RenderCommand::BindShaderResource(0, static_cast<UTexture2D*>(nullptr), EShaderBindFlagBits::Pixel);
+}
+
 void FSceneRenderer::InitViews(FRenderer* Renderer, const FSceneRenderOptions& Options)
 {
 	bLightUploadSucceeded = false;
@@ -659,6 +835,9 @@ bool FSceneRenderer::AddViewportPasses(FRenderGraphBuilder& Graph, FRenderer* Re
 	if (!AddCorePasses(Graph, Renderer, Targets, CoreOptions, Skybox)) // 기본적으로 그려져야 되는 Core Pass 들
 		return false;
 	
+	if(!AddDecalPass(Graph, Renderer, Targets, Options))
+		return false;
+
 	const FRenderGraphTextureRef SceneColor = Graph.ImportTexture(Targets.SceneColor.get(), "SceneColor");
 	const FRenderGraphTextureRef Depth = Graph.ImportTexture(Targets.Depth.get(), "SceneDepth");
 	if (!SceneColor || !Depth) return false;

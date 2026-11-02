@@ -37,6 +37,8 @@ public:
 	void SetCastShadow(bool NewValue);
 	void SetReceiveShadow(bool NewValue);
 
+	bool IsReceivesDecals() const { return bReceivesDecals; }
+
 	bool bCastsShadow = true;
 	bool bReceiveShadow = true;
 private:
@@ -54,4 +56,5 @@ private:
 	bool bRenderStateQueued = false;
 	bool bVisible = true;
 	bool bHiddenInGame = false;
+	bool bReceivesDecals = true;
 };

@@ -98,7 +98,8 @@ bool UPrimitiveComponent::MoveComponent(const FVector& Delta, const FRotator& Ne
 void UPrimitiveComponent::PostEditChangeProperty(const FProperty& Property)
 {
 	if (Property.Name == "bCastShadow" ||
-		Property.Name == "bReceiveShadow")
+		Property.Name == "bReceiveShadow" ||
+		Property.Name == "bReceivesDecals")
 	{
 		MarkRenderStateDirty();
 	}
@@ -117,6 +118,14 @@ void UPrimitiveComponent::SetReceiveShadow(bool NewValue)
 	if (bReceiveShadow != NewValue)
 	{
 		bReceiveShadow = NewValue;
+	}
+}
+
+void UPrimitiveComponent::SetReceivesDecals(bool NewValue)
+{
+	if(bReceivesDecals != NewValue)
+	{
+		bReceivesDecals = NewValue;
 	}
 }
 

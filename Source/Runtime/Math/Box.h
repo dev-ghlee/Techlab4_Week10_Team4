@@ -5,6 +5,12 @@ struct FBox
 	FVector Min;
 	FVector Max;
 	
+	FVector GetCenter() { return (Min + Max) * 0.5f; }
+	FVector GetExtent() { return (Max - Min) * 0.5f; }
+	FVector GetSize() const { return Max - Min; }
+	FBox() : Min(FVector::ZeroVector), Max(FVector::ZeroVector) {}
+	FBox(const FVector& InMin, const FVector& InMax) : Min(InMin), Max(InMax) {}
+
 
 	FBox GetWorldAABB(const FMatrix& M) const
 	{
@@ -43,4 +49,14 @@ struct FBox
 		Max.Y = std::max(Max.Y, Other.Max.Y);
 		Max.Z = std::max(Max.Z, Other.Max.Z);
 	}
+
+	bool Intersects(const FBox& Other) const
+	{
+		return (Min.X <= Other.Max.X && Max.X >= Other.Min.X) &&
+			(Min.Y <= Other.Max.Y && Max.Y >= Other.Min.Y) &&
+			(Min.Z <= Other.Max.Z && Max.Z >= Other.Min.Z);
+	}
 };
+
+struct FWorldBox { FVector Center; FVector Axis[3]; FVector Extent; };
+	

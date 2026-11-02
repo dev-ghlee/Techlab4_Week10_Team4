@@ -297,6 +297,48 @@ void FScene::InvalidateAllShadows()
 	ShadowOldestVersion = ++ShadowVersion;
 }
 
+void FScene::AddDecal(UDecalComponent* InComponent)
+{
+	if(InComponent == nullptr)
+	{
+		return;
+	}
+
+	FDecalSceneProxy* NewDecalSceneProxy = new FDecalSceneProxy(InComponent);
+	InComponent->SceneProxy = NewDecalSceneProxy;
+	DecalProxies.Add(NewDecalSceneProxy);
+}
+
+void FScene::RemoveDecal(UDecalComponent* InComponent)
+{
+	if(InComponent == nullptr)
+	{
+		return;
+	}
+
+	uint32 IndexToRemove = DecalProxies.Find(InComponent->SceneProxy);
+	if(IndexToRemove == -1)
+	{
+		return;
+	}
+
+	FDecalSceneProxy* ProxyToRemove = DecalProxies[IndexToRemove];
+	DecalProxies.RemoveAtSwap(IndexToRemove);
+	delete ProxyToRemove;
+	InComponent->SceneProxy = nullptr;	
+}
+
+void FScene::RemoveAllDecals()
+{
+	for(uint32 index = 0; index < DecalProxies.Num(); index++)
+	{
+		FDecalSceneProxy* Proxy = DecalProxies[index];
+		delete Proxy;
+	}
+
+	DecalProxies.Reset();
+}
+
 void FScene::MarkDirty(FPrimitiveSceneProxy* Proxy)
 {
 	if (Proxy->bQueuedForUpdate) return;            // 중복 추가 방지

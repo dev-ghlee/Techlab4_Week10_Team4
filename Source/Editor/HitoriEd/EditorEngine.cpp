@@ -48,6 +48,7 @@
 #include <sol/sol.hpp>
 
 #include "Components/ShapeComponent.h"
+#include "Components/DecalComponent.h"
 
 #include "Physics/Collision.h"
 
@@ -1176,6 +1177,7 @@ void UEditorEngine::RenderFrame(FEditorViewportClient* ViewClient,
 
 						DrawCollisionShapes(EditorWorld, LineBatcher.get(), SelectedActor);
 						DrawSpringArms(EditorWorld, LineBatcher.get(), SelectedActor);
+						DrawDebugDecal(EditorWorld, LineBatcher.get(), SelectedActor);
 
 						LineBatcher->OnRender(SceneView.ViewProjectionMatrix);
 					};
