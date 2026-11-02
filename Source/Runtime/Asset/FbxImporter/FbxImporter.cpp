@@ -6,6 +6,7 @@
 #include "Math/Quat.h"
 #include "Render/SkeletalMeshData.h"
 
+#include <algorithm>
 #include <cmath>
 #include <fbxsdk.h>
 #include <limits>
@@ -22,6 +23,13 @@ struct FFbxSkinCluster
 
 	// 연결 본, Control Point Weight, 바인드 정보를 제공한다.
 	FbxCluster* Cluster = nullptr;
+};
+
+// 최종 Weight를 만들기 전까지 보관하는 본 영향 하나.
+struct FFbxBoneInfluence
+{
+	int32 BoneIndex = -1;
+	double Weight = 0.0;
 };
 
 // 이번 임포트 작업에서만 사용하는 임시 정보.
@@ -51,6 +59,13 @@ struct FImportContext
 
 	// 각 Mesh의 Control Point를 루트 기준 공간으로 변환하는 행렬.
 	TMap<FbxNode*, FbxMatrix> MeshToSkeletalMatrices;
+
+	// Mesh Node별 Control Point에 영향을 주는 원본 본 영향 목록.
+	TMap<FbxNode*, TArray<TArray<FFbxBoneInfluence>>> ControlPointInfluences;
+
+	// 최대 영향 개수 선정과 정규화가 끝난 Control Point별 스키닝 정보.
+	// 이후 정점을 분리할 때 해당 Control Point의 값을 복사한다.
+	TMap<FbxNode*, TArray<FSkinWeightInfo>> ControlPointSkinWeights;
 };
 
 bool FFbxImporter::IsWithinFloatRange(double Value)
@@ -651,7 +666,175 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		ImportedData.RefBasesInvMatrix.Add(EngineInverseBind);
 	}
 
-	// 이후 여기에 정점별 본 영향과 메시 등의 추출을 추가한다.
+	for (const FFbxSkinCluster& SkinCluster : Context.SkinClusters)
+	{
+		const FbxCluster* Cluster = SkinCluster.Cluster;
+		const int32* BoneIndex = Context.BoneIndexMap.Find(Cluster->GetLink());
+
+		const int32 InfluenceCount = Cluster->GetControlPointIndicesCount();
+		const int* Indices = Cluster->GetControlPointIndices();
+		const double* Weights = Cluster->GetControlPointWeights();
+
+		// 영향이 없는 Cluster는 배열 포인터가 nullptr일 수 있다.
+		if (!BoneIndex || InfluenceCount < 0
+			|| (InfluenceCount > 0 && (!Indices || !Weights)))
+		{
+			OutError = "Invalid FBX cluster influence data.";
+			return false;
+		}
+
+		auto& MeshInfluences = Context.ControlPointInfluences.FindOrAdd(SkinCluster.MeshNode);
+
+		// 같은 Mesh의 Cluster들은 같은 크기를 사용한다.
+		// SetNum()은 크기가 같으면 기존에 수집한 내용을 유지한다.
+		MeshInfluences.SetNum(SkinCluster.MeshNode->GetMesh()->GetControlPointsCount());
+
+		for (int32 EntryIndex = 0; EntryIndex < InfluenceCount; ++EntryIndex)
+		{
+			const int32 ControlPointIndex = Indices[EntryIndex];
+			const double Weight = Weights[EntryIndex];
+
+			if (!MeshInfluences.IsValidIndex(ControlPointIndex)
+				|| !std::isfinite(Weight) || Weight < 0.0)
+			{
+				OutError = "Invalid FBX control point influence.";
+				return false;
+			}
+
+			// 영향력이 없는 항목은 저장하지 않는다.
+			if (Weight > 0.0)
+			{
+				MeshInfluences[ControlPointIndex].Add({ *BoneIndex, Weight });
+			}
+		}
+	}
+
+	// TotalOne의 원본 Weight 합계에 허용할 오차.
+	constexpr double WeightSumTolerance = 1e-4;
+
+	for (auto& MeshEntry : Context.ControlPointInfluences)
+	{
+		FbxNode* MeshNode = MeshEntry.first;
+		auto& MeshInfluences = MeshEntry.second;
+
+		// 수집 대상은 Skin 하나와 유효한 Cluster가 있는 Mesh다.
+		// 같은 Mesh의 Cluster들은 동일한 링크 모드로 검증되어 있다.
+		FbxSkin* Skin = static_cast<FbxSkin*>(
+			MeshNode->GetMesh()->GetDeformer(0, FbxDeformer::eSkin));
+
+		const bool bRigid = Skin->GetSkinningType() == FbxSkin::eRigid;
+		const bool bTotalOne = Skin->GetCluster(0)->GetLinkMode() == FbxCluster::eTotalOne;
+
+		for (auto& Influences : MeshInfluences)
+		{
+			// 양의 영향이 없는 점은 기존 규약대로 비스키닝 상태로 유지한다.
+			if (Influences.IsEmpty())
+			{
+				continue;
+			}
+
+			TMap<int32, double> MergedWeights;
+			double TotalWeight = 0.0;
+
+			for (const FFbxBoneInfluence& Influence : Influences)
+			{
+				// 같은 본 인덱스에 해당하는 Weight를 모두 더한다.
+				MergedWeights.FindOrAdd(Influence.BoneIndex) += Influence.Weight;
+				TotalWeight += Influence.Weight;
+			}
+
+			// 개별 Weight가 유효해도 합산 과정에서 범위를 넘을 수 있다.
+			if (!std::isfinite(TotalWeight) || TotalWeight <= 0.0)
+			{
+				OutError = "Invalid control point weight sum.";
+				return false;
+			}
+
+			// Rigid는 하나의 Control Point에 하나의 본만 영향을 줘야 한다.
+			if (bRigid && MergedWeights.Num() != 1)
+			{
+				OutError = "Rigid skinning requires one bone per control point.";
+				return false;
+			}
+
+			// 영향 개수 제한이나 정규화 전에 원본 합계를 검사한다.
+			if (bTotalOne && std::abs(TotalWeight - 1.0) > WeightSumTolerance)
+			{
+				OutError = "TotalOne control point weights must sum to one.";
+				return false;
+			}
+
+			// 원본 목록을 중복 본이 합산된 목록으로 교체한다.
+			Influences.Reset();
+
+			for (const auto& BoneEntry : MergedWeights)
+			{
+				const int32 BoneIndex = BoneEntry.first;
+				const double Weight = BoneEntry.second;
+				Influences.Add({ BoneIndex, Weight });
+			}
+		}
+	}
+
+	for (auto& MeshEntry : Context.ControlPointInfluences)
+	{
+		FbxNode* MeshNode = MeshEntry.first;
+		auto& MeshInfluences = MeshEntry.second;
+		auto& MeshSkinWeights = Context.ControlPointSkinWeights.FindOrAdd(MeshNode);
+		MeshSkinWeights.SetNum(MeshInfluences.Num());
+
+		for (int32 ControlPointIndex = 0;
+			ControlPointIndex < MeshInfluences.Num();
+			++ControlPointIndex)
+		{
+			auto& Influences = MeshInfluences[ControlPointIndex];
+			FSkinWeightInfo& SkinWeight = MeshSkinWeights[ControlPointIndex];
+
+			// 미사용 슬롯과 영향이 없는 점은 모두 0으로 유지한다.
+			SkinWeight = {};
+			if (Influences.IsEmpty())
+			{
+				continue;
+			}
+
+			// 영향력이 같으면 본 인덱스가 작은 항목을 먼저 선택한다.
+			// Map 순회 순서와 관계없이 결과를 일정하게 만든다.
+			std::sort(Influences.begin(), Influences.end(),
+				[](const FFbxBoneInfluence& Left, const FFbxBoneInfluence& Right)
+				{
+					if (Left.Weight != Right.Weight)
+					{
+						return Left.Weight > Right.Weight;
+					}
+					return Left.BoneIndex < Right.BoneIndex;
+				});
+
+			const int32 SelectedCount = std::min(Influences.Num(), static_cast<int32>(MaxBoneInfluences));
+			double SelectedWeightSum = 0.0;
+
+			for (int32 InfluenceIndex = 0; InfluenceIndex < SelectedCount; ++InfluenceIndex)
+			{
+				SelectedWeightSum += Influences[InfluenceIndex].Weight;
+			}
+
+			if (!std::isfinite(SelectedWeightSum) || SelectedWeightSum <= 0.0)
+			{
+				OutError = "Invalid selected control point weight sum.";
+				return false;
+			}
+
+			for (int32 InfluenceIndex = 0; InfluenceIndex < SelectedCount; ++InfluenceIndex)
+			{
+				const FFbxBoneInfluence& Influence = Influences[InfluenceIndex];
+				const double NormalizedWeight = Influence.Weight / SelectedWeightSum;
+
+				SkinWeight.InfluenceBones[InfluenceIndex] = Influence.BoneIndex;
+				SkinWeight.InfluenceWeights[InfluenceIndex] = static_cast<float>(NormalizedWeight);
+			}
+		}
+	}
+
+	// 이후 여기에 재질과 메시 등의 추출을 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
 
