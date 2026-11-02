@@ -5,6 +5,7 @@
 #include "Containers/Map.h"
 #include "Render/SkeletalMeshData.h"
 
+#include <cmath>
 #include <fbxsdk.h>
 
 // Mesh Node와 해당 Skin, Cluster의 연결 관계.
@@ -31,11 +32,20 @@ struct FImportContext
 	// 각 Mesh Node에 연결된 Skin과 Cluster 정보.
 	TArray<FFbxSkinCluster> SkinClusters;
 
+	// 공통 SkeletalMesh 공간의 기준으로 사용할 본 Node.
+	FbxNode* RootBoneNode = nullptr;
+
 	// 부모부터 자식 순서로 저장한 SDK Node 목록.
 	TArray<FbxNode*> BoneNodes;
 
 	// SDK Node와 엔진 본 인덱스의 대응 관계.
 	TMap<FbxNode*, int32> BoneIndexMap;
+
+	// Scene 전역 공간을 루트 본의 바인드 로컬 공간으로 변환한다.
+	FbxMatrix SceneToSkeletal;
+
+	// 각 Mesh의 Control Point를 루트 기준 공간으로 변환하는 행렬.
+	TMap<FbxNode*, FbxMatrix> MeshToSkeletalMatrices;
 };
 
 bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FString& OutError)
@@ -228,6 +238,138 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 	FbxNode* SceneRoot = Scene->GetRootNode();
 	for (const FFbxSkinCluster& SkinCluster : Context.SkinClusters)
 	{
+		FbxNode* CandidateRoot = nullptr;
+		FbxNode* Node = SkinCluster.Cluster->GetLink();
+
+		// 연결 본의 조상 중 가장 위에 있는 Skeleton Node를 찾는다.
+		while (Node && Node != SceneRoot)
+		{
+			if (Node->GetSkeleton())
+			{
+				CandidateRoot = Node;
+			}
+
+			Node = Node->GetParent();
+		}
+
+		if (!CandidateRoot)
+		{
+			OutError = "Failed to find a skeleton root.";
+			return false;
+		}
+
+		// 하나의 리소스에는 동일한 루트의 스켈레톤만 포함한다.
+		if (Context.RootBoneNode && Context.RootBoneNode != CandidateRoot)
+		{
+			OutError = "Multiple skeleton roots are not supported.";
+			return false;
+		}
+
+		Context.RootBoneNode = CandidateRoot;
+	}
+
+	FbxMatrix RootBindGlobal;
+	bool bFoundRootBind = false;
+
+	// 루트 본이 Cluster에 직접 연결되어 있다면 바인드 행렬을 읽는다.
+	for (const FFbxSkinCluster& SkinCluster : Context.SkinClusters)
+	{
+		if (SkinCluster.Cluster->GetLink() == Context.RootBoneNode)
+		{
+			FbxAMatrix LinkBindGlobal;
+			SkinCluster.Cluster->GetTransformLinkMatrix(LinkBindGlobal);
+
+			RootBindGlobal = FbxMatrix(LinkBindGlobal);
+			bFoundRootBind = true;
+			break;
+		}
+	}
+
+	// 루트는 정점에 직접 영향을 주지 않아 Cluster가 없을 수도 있다.
+	// 이 경우 Scene의 Bind Pose에서 루트의 전역 행렬을 찾는다.
+	for (int32 PoseIndex = 0;
+		 !bFoundRootBind && PoseIndex < Scene->GetPoseCount();
+		 ++PoseIndex)
+	{
+		FbxPose* Pose = Scene->GetPose(PoseIndex);
+		if (!Pose || !Pose->IsBindPose())
+		{
+			continue;
+		}
+
+		const int32 RootPoseIndex = Pose->Find(Context.RootBoneNode);
+		if (RootPoseIndex >= 0)
+		{
+			RootBindGlobal = Pose->GetMatrix(RootPoseIndex);
+			bFoundRootBind = true;
+		}
+	}
+
+	if (!bFoundRootBind)
+	{
+		OutError = "Failed to find the root bone bind transform.";
+		return false;
+	}
+
+	// 원점과 축을 되돌리려면 역행렬이 존재해야 한다.
+	const double Determinant = RootBindGlobal.Determinant();
+	if (!std::isfinite(Determinant) || Determinant == 0.0)
+	{
+		OutError = "Root bone bind transform is not invertible.";
+		return false;
+	}
+
+	Context.SceneToSkeletal = RootBindGlobal.Inverse();
+
+	for (FbxNode* MeshNode : Context.MeshNodes)
+	{
+		FbxAMatrix MeshBindGlobal;
+		bool bHasBindMatrix = false;
+
+		// 해당 Mesh의 바인드 당시 전역 배치를 찾는다.
+		for (const FFbxSkinCluster& SkinCluster : Context.SkinClusters)
+		{
+			if (SkinCluster.MeshNode != MeshNode)
+			{
+				continue;
+			}
+
+			FbxAMatrix ClusterMeshBind;
+			SkinCluster.Cluster->GetTransformMatrix(ClusterMeshBind);
+
+			// 하나의 Mesh에는 하나의 바인드 배치를 사용한다.
+			if (bHasBindMatrix && MeshBindGlobal != ClusterMeshBind)
+			{
+				OutError = "FBX mesh contains inconsistent bind transforms.";
+				return false;
+			}
+
+			MeshBindGlobal = ClusterMeshBind;
+			bHasBindMatrix = true;
+		}
+
+		// Skin 연결이 없는 Mesh는 기본 배치를 사용한다.
+		if (!bHasBindMatrix)
+		{
+			MeshBindGlobal = MeshNode->EvaluateGlobalTransform();
+		}
+
+		// Node의 Geometry에만 적용되는 추가 변환을 구성한다.
+		FbxAMatrix Geometry;
+		Geometry.SetTRS(
+			MeshNode->GetGeometricTranslation(FbxNode::eSourcePivot),
+			MeshNode->GetGeometricRotation(FbxNode::eSourcePivot),
+			MeshNode->GetGeometricScaling(FbxNode::eSourcePivot));
+
+		// SDK 곱셈 규칙에 따라 오른쪽 변환부터 적용된다.
+		const FbxMatrix MeshToSkeletal =
+			Context.SceneToSkeletal * FbxMatrix(MeshBindGlobal) * FbxMatrix(Geometry);
+
+		Context.MeshToSkeletalMatrices.Add(MeshNode, MeshToSkeletal);
+	}
+
+	for (const FFbxSkinCluster& SkinCluster : Context.SkinClusters)
+	{
 		// 연결 본에서 시작해 아직 등록되지 않은 조상들을 모은다.
 		TArray<FbxNode*> BoneChain;
 		FbxNode* Node = SkinCluster.Cluster->GetLink();
@@ -241,6 +383,12 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 			}
 
 			BoneChain.Add(Node);
+
+			// 선택한 루트 본 위의 그룹 Node는 본 목록에 포함하지 않는다.
+			if (Node == Context.RootBoneNode)
+			{
+				break;
+			}
 
 			// 부모로 올라가며 필요한 조상을 수집한다.
 			Node = Node->GetParent();
@@ -268,9 +416,8 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 
 		FbxNode* ParentNode = BoneNode->GetParent();
 
-		// SceneRoot는 본 목록에서 제외했으므로 부모 인덱스를 연결하지 않는다.
-		// 부모가 없는 경우도 기본값 -1을 유지한다.
-		if (ParentNode && ParentNode != SceneRoot)
+		// 기준 루트 본은 부모 인덱스의 기본값 -1을 유지한다.
+		if (BoneNode != Context.RootBoneNode && ParentNode)
 		{
 			const int32* ParentIndex = Context.BoneIndexMap.Find(ParentNode);
 
@@ -288,7 +435,7 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		ImportedData.RefSkeleton.RawRefBoneInfo.Add(BoneInfo);
 	}
 
-	// 이후 여기에 공통 메시 공간, 기준 포즈와 메시 등의 추출을 추가한다.
+	// 이후 여기에 루트 기준의 본 포즈와 메시 등의 추출을 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
 
