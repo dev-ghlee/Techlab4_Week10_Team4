@@ -4,6 +4,7 @@
 
 struct FSkeletalMeshData;
 struct FTransform;
+struct FVector4;
 
 // Node 목록과 본 인덱스 대응표 등의 임시 정보. 정의는 cpp에 둔다.
 struct FImportContext;
@@ -13,6 +14,8 @@ namespace fbxsdk
 {
 	class FbxNode;
 	class FbxMatrix;
+	class FbxSurfaceMaterial;
+	class FbxProperty;
 }
 
 class FFbxImporter
@@ -29,6 +32,13 @@ private:
 
 	// SDK 행렬을 엔진 Transform으로 변환하고 원본 변환의 보존 여부를 확인한다.
 	static bool ConvertFbxMatrixToTransform(const fbxsdk::FbxMatrix& InMatrix, FTransform& OutTransform, FString& OutError);
+
+	// 표준 Lambert와 Phong 재질의 Diffuse를 엔진 BaseColor로 읽는다.
+	static bool ReadMaterialBaseColor(fbxsdk::FbxSurfaceMaterial* Material, FVector4& OutBaseColor, FString& OutError);
+
+	// 연결된 파일 텍스처를 찾아 FBX 파일 기준으로 경로를 해석한다.
+	static bool ReadMaterialTexturePath(
+		const fbxsdk::FbxProperty& Property, const FString& FbxPath, FString& OutTexturePath, FString& OutError);
 
 	// 현재 Node에서 필요한 대상을 수집하고 자식마다 재귀 호출한다.
 	static void LoadSceneRecursive(fbxsdk::FbxNode* Node, FImportContext& Context);

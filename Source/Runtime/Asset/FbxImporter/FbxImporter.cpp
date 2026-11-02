@@ -9,7 +9,9 @@
 #include <algorithm>
 #include <cmath>
 #include <fbxsdk.h>
+#include <filesystem>
 #include <limits>
+#include <system_error>
 
 // Mesh Node와 해당 Skin, Cluster의 연결 관계.
 // 모든 포인터는 SDK 객체를 참조하며 소유하지 않는다.
@@ -66,6 +68,10 @@ struct FImportContext
 	// 최대 영향 개수 선정과 정규화가 끝난 Control Point별 스키닝 정보.
 	// 이후 정점을 분리할 때 해당 Control Point의 값을 복사한다.
 	TMap<FbxNode*, TArray<FSkinWeightInfo>> ControlPointSkinWeights;
+
+	// Mesh Node의 로컬 재질 인덱스에서 전체 MaterialSlots 인덱스로의 대응표.
+	// 재질이 없는 Mesh는 기본 슬롯을 가리키는 항목 하나를 둔다.
+	TMap<FbxNode*, TArray<uint16>> MeshMaterialIndices;
 };
 
 bool FFbxImporter::IsWithinFloatRange(double Value)
@@ -143,6 +149,103 @@ bool FFbxImporter::ConvertFbxMatrixToTransform(const FbxMatrix& InMatrix, FTrans
 
 	OutTransform = Converted;
 	return true;
+}
+
+bool FFbxImporter::ReadMaterialBaseColor(FbxSurfaceMaterial* Material, FVector4& OutBaseColor, FString& OutError)
+{
+	// Phong은 Lambert를 상속하므로 두 표준 재질을 함께 처리한다.
+	FbxSurfaceLambert* Lambert = FbxCast<FbxSurfaceLambert>(Material);
+	if (!Lambert)
+	{
+		OutError = "Only standard Lambert and Phong materials are supported.";
+		return false;
+	}
+
+	const FbxDouble3 Diffuse = Lambert->Diffuse.Get();
+	const double DiffuseFactor = Lambert->DiffuseFactor.Get();
+
+	// 현재 구현은 불투명 재질을 기준으로 Alpha를 1로 둔다.
+	FVector4 BaseColor(1, 1, 1, 1);
+
+	for (int32 Channel = 0; Channel < 3; ++Channel)
+	{
+		// 재질의 Diffuse 강도를 색상에 반영한다.
+		const double Value = Diffuse[Channel] * DiffuseFactor;
+
+		if (!IsWithinFloatRange(Value))
+		{
+			OutError = "Material base color exceeds the engine numeric range.";
+			return false;
+		}
+
+		BaseColor[Channel] = static_cast<float>(Value);
+	}
+
+	// 성공한 경우에만 출력값을 변경한다.
+	OutBaseColor = BaseColor;
+	return true;
+}
+
+bool FFbxImporter::ReadMaterialTexturePath(
+	const FbxProperty& Property, const FString& FbxPath, FString& OutTexturePath, FString& OutError)
+{
+	OutTexturePath.clear();
+
+	// 텍스처 연결이 없는 재질도 허용한다.
+	if (!Property.IsValid())
+	{
+		return true;
+	}
+
+	const int32 TextureCount = Property.GetSrcObjectCount<FbxTexture>();
+	if (TextureCount == 0)
+	{
+		return true;
+	}
+
+	// 현재 재질 슬롯은 채널마다 파일 텍스처 하나만 저장한다.
+	FbxFileTexture* Texture = TextureCount == 1
+		? FbxCast<FbxFileTexture>(Property.GetSrcObject<FbxTexture>(0))
+		: nullptr;
+
+	if (!Texture)
+	{
+		OutError = "Only one file texture per material channel is supported.";
+		return false;
+	}
+
+	// 함께 옮겨진 에셋을 지원하도록 상대 경로를 먼저 확인한다.
+	const char* FileNames[] =
+	{
+		Texture->GetRelativeFileName(),
+		Texture->GetFileName()
+	};
+
+	for (const char* FileName : FileNames)
+	{
+		if (!FileName || FileName[0] == '\0')
+		{
+			continue;
+		}
+
+		std::filesystem::path Candidate(FileName);
+		if (!Candidate.is_absolute())
+		{
+			Candidate = std::filesystem::path(FbxPath).parent_path() / Candidate;
+		}
+
+		Candidate = Candidate.lexically_normal();
+
+		std::error_code Error;
+		if (std::filesystem::is_regular_file(Candidate, Error))
+		{
+			OutTexturePath = Candidate.generic_string();
+			return true;
+		}
+	}
+
+	OutError = "FBX material texture file was not found.";
+	return false;
 }
 
 bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FString& OutError)
@@ -384,9 +487,7 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 
 	// 루트는 정점에 직접 영향을 주지 않아 Cluster가 없을 수도 있다.
 	// 이 경우 Scene의 Bind Pose에서 루트의 전역 행렬을 찾는다.
-	for (int32 PoseIndex = 0;
-		 !bFoundRootBind && PoseIndex < Scene->GetPoseCount();
-		 ++PoseIndex)
+	for (int32 PoseIndex = 0; !bFoundRootBind && PoseIndex < Scene->GetPoseCount(); ++PoseIndex)
 	{
 		FbxPose* Pose = Scene->GetPose(PoseIndex);
 		if (!Pose || !Pose->IsBindPose())
@@ -783,9 +884,7 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		auto& MeshSkinWeights = Context.ControlPointSkinWeights.FindOrAdd(MeshNode);
 		MeshSkinWeights.SetNum(MeshInfluences.Num());
 
-		for (int32 ControlPointIndex = 0;
-			ControlPointIndex < MeshInfluences.Num();
-			++ControlPointIndex)
+		for (int32 ControlPointIndex = 0; ControlPointIndex < MeshInfluences.Num(); ++ControlPointIndex)
 		{
 			auto& Influences = MeshInfluences[ControlPointIndex];
 			FSkinWeightInfo& SkinWeight = MeshSkinWeights[ControlPointIndex];
@@ -834,7 +933,65 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		}
 	}
 
-	// 이후 여기에 재질과 메시 등의 추출을 추가한다.
+	// SDK 재질 객체가 같으면 기존 슬롯을 재사용한다.
+	TMap<FbxSurfaceMaterial*, uint16> MaterialIndexMap;
+
+	// 재질이 없는 Mesh와 빈 재질 항목에 사용할 기본 슬롯.
+	FStaticMaterialSlot DefaultSlot;
+	DefaultSlot.Name = "DefaultMaterial";
+	const uint16 DefaultMaterialIndex = static_cast<uint16>(ImportedData.MaterialSlots.Add(DefaultSlot));
+
+	for (FbxNode* MeshNode : Context.MeshNodes)
+	{
+		const int32 MaterialCount = MeshNode->GetMaterialCount();
+		auto& MaterialIndices = Context.MeshMaterialIndices.FindOrAdd(MeshNode);
+
+		// 모든 항목을 기본 슬롯 인덱스로 채운다.
+		MaterialIndices.Init(DefaultMaterialIndex, std::max(MaterialCount, 1));
+
+		for (int32 LocalMaterialIndex = 0; LocalMaterialIndex < MaterialCount; ++LocalMaterialIndex)
+		{
+			FbxSurfaceMaterial* Material = MeshNode->GetMaterial(LocalMaterialIndex);
+			if (!Material)
+			{
+				continue;
+			}
+
+			const uint16* ExistingIndex = MaterialIndexMap.Find(Material);
+			if (ExistingIndex)
+			{
+				MaterialIndices[LocalMaterialIndex] = *ExistingIndex;
+				continue;
+			}
+
+			// Section.MaterialIndex의 uint16 범위를 넘지 않도록 확인한다.
+			if (ImportedData.MaterialSlots.Num() > std::numeric_limits<uint16>::max())
+			{
+				OutError = "Skeletal mesh contains too many material slots.";
+				return false;
+			}
+
+			FStaticMaterialSlot Slot;
+			Slot.Name = Material->GetName();
+
+			const FbxProperty Diffuse = Material->FindProperty(FbxSurfaceMaterial::sDiffuse);
+			const FbxProperty Normal = Material->FindProperty(FbxSurfaceMaterial::sNormalMap);
+
+			if (!ReadMaterialBaseColor(Material, Slot.BaseColor, OutError)
+				|| !ReadMaterialTexturePath(Diffuse, Path, Slot.DiffuseTexturePath, OutError)
+				|| !ReadMaterialTexturePath(Normal, Path, Slot.NormalTexturePath, OutError))
+			{
+				return false;
+			}
+
+			const uint16 SlotIndex = static_cast<uint16>(ImportedData.MaterialSlots.Add(Slot));
+
+			MaterialIndexMap.Add(Material, SlotIndex);
+			MaterialIndices[LocalMaterialIndex] = SlotIndex;
+		}
+	}
+
+	// 이후 여기에 메시 등의 추출을 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
 
