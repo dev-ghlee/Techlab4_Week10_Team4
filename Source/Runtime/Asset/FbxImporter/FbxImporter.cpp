@@ -611,7 +611,47 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		ImportedData.RefSkeleton.RawRefBonePose.Add(RefTransform);
 	}
 
-	// 이후 여기에 역바인드 행렬과 메시 등의 추출을 추가한다.
+	for (int32 BoneIndex = 0; BoneIndex < Context.BoneBindGlobals.Num(); ++BoneIndex)
+	{
+		// 본 공간에서 공통 SkeletalMesh 공간으로 가는 바인드 행렬을 뒤집는다.
+		// 결과는 공통 SkeletalMesh 공간에서 바인드 당시 본 공간으로 가는 행렬이다.
+		const FbxMatrix InverseBind = Context.BoneBindGlobals[BoneIndex].Inverse();
+		const FbxVector4 Origin = InverseBind.MultNormalize(FbxVector4(0, 0, 0, 1));
+
+		FMatrix EngineInverseBind = FMatrix::Identity;
+
+		for (int32 Row = 0; Row < 4; ++Row)
+		{
+			// 앞의 세 행은 단위축 끝점, 마지막 행은 원점을 사용한다.
+			FbxVector4 Point(0, 0, 0, 1);
+			if (Row < 3)
+			{
+				Point[Row] = 1.0;
+			}
+
+			const FbxVector4 Transformed = InverseBind.MultNormalize(Point);
+
+			for (int32 Column = 0; Column < 3; ++Column)
+			{
+				// 축 끝점에서 원점을 빼 이동을 제거한다.
+				// 마지막 행에는 이동 자체를 저장한다.
+				const double Value = Row < 3 ? Transformed[Column] - Origin[Column] : Origin[Column];
+
+				if (!IsWithinFloatRange(Value))
+				{
+					OutError = "Inverse bind matrix exceeds the engine numeric range.";
+					return false;
+				}
+
+				EngineInverseBind[Row][Column] = static_cast<float>(Value);
+			}
+		}
+
+		// 본 정보와 기준 포즈에 대응하는 본 인덱스 순서로 저장한다.
+		ImportedData.RefBasesInvMatrix.Add(EngineInverseBind);
+	}
+
+	// 이후 여기에 정점별 본 영향과 메시 등의 추출을 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
 
