@@ -3,10 +3,12 @@
 
 #include "Containers/Array.h"
 #include "Containers/Map.h"
+#include "Math/Quat.h"
 #include "Render/SkeletalMeshData.h"
 
 #include <cmath>
 #include <fbxsdk.h>
+#include <limits>
 
 // Mesh Node와 해당 Skin, Cluster의 연결 관계.
 // 모든 포인터는 SDK 객체를 참조하며 소유하지 않는다.
@@ -41,12 +43,92 @@ struct FImportContext
 	// SDK Node와 엔진 본 인덱스의 대응 관계.
 	TMap<FbxNode*, int32> BoneIndexMap;
 
+	// BoneNodes와 같은 순서의 루트 기준 바인드 전역 행렬.
+	TArray<FbxMatrix> BoneBindGlobals;
+
 	// Scene 전역 공간을 루트 본의 바인드 로컬 공간으로 변환한다.
 	FbxMatrix SceneToSkeletal;
 
 	// 각 Mesh의 Control Point를 루트 기준 공간으로 변환하는 행렬.
 	TMap<FbxNode*, FbxMatrix> MeshToSkeletalMatrices;
 };
+
+bool FFbxImporter::IsWithinFloatRange(double Value)
+{
+	return std::isfinite(Value) && std::abs(Value) <= std::numeric_limits<float>::max();
+}
+
+bool FFbxImporter::ConvertFbxMatrixToTransform(const FbxMatrix& InMatrix, FTransform& OutTransform, FString& OutError)
+{
+	FbxVector4 Translation; 
+	FbxVector4 Shearing; 
+	FbxVector4 Scaling;
+
+	FbxQuaternion Rotation;
+	double Sign = 1.0;
+
+	// 위치·회전·전단·스케일·행렬식 부호를 SDK에서 추출한다.
+	InMatrix.GetElements(Translation, Rotation, Shearing, Scaling, Sign);
+
+	// SDK에서 XYZ 회전각을 구한다. 반환 단위는 도(degree)다.
+	const FbxVector4 Euler = Rotation.DecomposeSphericalXYZ();
+
+	// 반사 부호가 Scaling에 이미 포함됐다면 중복 적용하지 않는다.
+	const bool bNegativeScale = (Scaling[0] < 0) ^ (Scaling[1] < 0) ^ (Scaling[2] < 0);
+	const double ScaleSign = (bNegativeScale == (Sign < 0) ? 1.0 : -1.0);
+
+	FTransform Converted;
+
+	for (int32 Axis = 0; Axis < 3; ++Axis)
+	{
+		const double SignedScale = Scaling[Axis] * ScaleSign;
+
+		if (!IsWithinFloatRange(Translation[Axis]) || !IsWithinFloatRange(Euler[Axis])
+			|| !IsWithinFloatRange(SignedScale) || std::abs(SignedScale) <= 1e-8)
+		{
+			OutError = "Bone transform contains unsupported values.";
+			return false;
+		}
+
+		Converted.Location[Axis] = static_cast<float>(Translation[Axis]);
+		Converted.Scale[Axis] = static_cast<float>(SignedScale);
+	}
+
+	// SDK의 X·Y·Z 회전을 프로젝트의 Roll·Pitch·Yaw에 대응시킨다.
+	Converted.Rotation = FRotator(
+		static_cast<float>(Euler[1]),
+		static_cast<float>(Euler[2]),
+		static_cast<float>(Euler[0]));
+
+	// 엔진에 저장한 회전을 다시 Quaternion으로 만들어 복원한다.
+	const FQuat EngineRotation = Converted.Rotation.Quaternion();
+
+	const FbxMatrix Rebuilt(
+		FbxVector4(Converted.Location.X, Converted.Location.Y, Converted.Location.Z),
+		FbxQuaternion(EngineRotation.X, EngineRotation.Y, EngineRotation.Z, EngineRotation.W),
+		FbxVector4(Converted.Scale.X, Converted.Scale.Y, Converted.Scale.Z));
+
+	// 전단 손실이나 회전 변환 오차가 허용 범위를 넘으면 실패한다.
+	for (int32 Row = 0; Row < 4; ++Row)
+	{
+		for (int32 Column = 0; Column < 4; ++Column)
+		{
+			const double Expected = InMatrix.Get(Row, Column);
+			const double Actual = Rebuilt.Get(Row, Column);
+			const double Tolerance = 1e-5 * (1.0 + std::abs(Expected));
+
+			if (!std::isfinite(Expected) || !std::isfinite(Actual)
+				|| std::abs(Expected - Actual) > Tolerance)
+			{
+				OutError = "Bone transform cannot be preserved as TRS.";
+				return false;
+			}
+		}
+	}
+
+	OutTransform = Converted;
+	return true;
+}
 
 bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FString& OutError)
 {
@@ -435,7 +517,101 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		ImportedData.RefSkeleton.RawRefBoneInfo.Add(BoneInfo);
 	}
 
-	// 이후 여기에 루트 기준의 본 포즈와 메시 등의 추출을 추가한다.
+	// Cluster에 연결된 본의 Scene 기준 바인드 전역 행렬을 모은다.
+	TMap<FbxNode*, FbxMatrix> BoneBindSceneGlobals;
+
+	for (const FFbxSkinCluster& SkinCluster : Context.SkinClusters)
+	{
+		FbxNode* BoneNode = SkinCluster.Cluster->GetLink();
+		FbxAMatrix LinkBindGlobal;
+		SkinCluster.Cluster->GetTransformLinkMatrix(LinkBindGlobal);
+		const FbxMatrix BindGlobal(LinkBindGlobal);
+
+		const FbxMatrix* Existing = BoneBindSceneGlobals.Find(BoneNode);
+		if (Existing && *Existing != BindGlobal)
+		{
+			OutError = "FBX bone contains inconsistent cluster bind transforms.";
+			return false;
+		}
+
+		BoneBindSceneGlobals.Add(BoneNode, BindGlobal);
+	}
+
+	// Bind Pose에서 Cluster에 직접 연결되지 않은 본의 행렬도 모은다.
+	// 기존 행렬과 다르면 동일한 기준 포즈로 처리할 수 없다.
+	for (int32 PoseIndex = 0; PoseIndex < Scene->GetPoseCount(); ++PoseIndex)
+	{
+		FbxPose* Pose = Scene->GetPose(PoseIndex);
+		if (!Pose || !Pose->IsBindPose())
+		{
+			continue;
+		}
+
+		for (int32 EntryIndex = 0; EntryIndex < Pose->GetCount(); ++EntryIndex)
+		{
+			FbxNode* BoneNode = Pose->GetNode(EntryIndex);
+			if (!Context.BoneIndexMap.Contains(BoneNode))
+			{
+				continue;
+			}
+
+			const FbxMatrix& BindGlobal = Pose->GetMatrix(EntryIndex);
+			const FbxMatrix* Existing = BoneBindSceneGlobals.Find(BoneNode);
+			if (Existing && *Existing != BindGlobal)
+			{
+				OutError = "FBX bind poses contain inconsistent bone transforms.";
+				return false;
+			}
+
+			BoneBindSceneGlobals.Add(BoneNode, BindGlobal);
+		}
+	}
+
+	for (int32 BoneIndex = 0; BoneIndex < Context.BoneNodes.Num(); ++BoneIndex)
+	{
+		FbxNode* BoneNode = Context.BoneNodes[BoneIndex];
+		const FbxMatrix* SceneBind = BoneBindSceneGlobals.Find(BoneNode);
+
+		if (!SceneBind)
+		{
+			OutError = "Failed to find a bone bind transform.";
+			return false;
+		}
+
+		// Scene 기준의 본 배치를 루트 기준 공통 공간으로 바꾼다.
+		const FbxMatrix BoneGlobal = Context.SceneToSkeletal * (*SceneBind);
+
+		// 자식의 로컬 변환과 역바인드 계산에는 역행렬이 필요하다.
+		const double BoneDeterminant = BoneGlobal.Determinant();
+		if (!std::isfinite(BoneDeterminant) || BoneDeterminant == 0.0)
+		{
+			OutError = "Bone bind transform is not invertible.";
+			return false;
+		}
+
+		const int32 ParentIndex = ImportedData.RefSkeleton.RawRefBoneInfo[BoneIndex].ParentIndex;
+
+		// 루트는 공통 공간 기준의 행렬을 그대로 사용한다.
+		FbxMatrix LocalBind = BoneGlobal;
+
+		if (ParentIndex >= 0)
+		{
+			// 부모의 전역 배치를 되돌려 부모 기준 로컬 행렬을 얻는다.
+			const FbxMatrix& ParentGlobal = Context.BoneBindGlobals[ParentIndex];
+			LocalBind = ParentGlobal.Inverse() * BoneGlobal;
+		}
+
+		FTransform RefTransform;
+		if (!ConvertFbxMatrixToTransform(LocalBind, RefTransform, OutError))
+		{
+			return false;
+		}
+
+		Context.BoneBindGlobals.Add(BoneGlobal);
+		ImportedData.RefSkeleton.RawRefBonePose.Add(RefTransform);
+	}
+
+	// 이후 여기에 역바인드 행렬과 메시 등의 추출을 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
 
