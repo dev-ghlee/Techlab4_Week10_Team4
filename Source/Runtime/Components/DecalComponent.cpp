@@ -10,6 +10,8 @@
 
 UDecalComponent::UDecalComponent()
 {
+	PrimaryComponentTick.bCanEverTick = true;
+
     FadeScreenSize = 0.01f;
     FadeStartDelay = 0.0f;
     FadeDuration = 0.0f;
@@ -140,6 +142,12 @@ void UDecalComponent::SetDecalColor(FColor InColor)
 void UDecalComponent::BeginPlay()
 {
     Super::BeginPlay();
+
+    float SpawnTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    if(SceneProxy)
+    {
+        SceneProxy->InitializeFadingParameters(SpawnTime, FadeDuration, FadeStartDelay, FadeInDuration, FadeInStartDelay);
+    }
 
     SetLifeSpan(FadeStartDelay + FadeDuration);
 }

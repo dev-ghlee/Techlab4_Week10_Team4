@@ -26,6 +26,9 @@ public:
 	void UpdateTransform();
 	void UpdateRenderState();
 
+	void InitializeFadingParameters(float AbsSpawnTime, float FadeDuration, float FadeStartDelay, float FadeInDuration, float FadeInStartDelay);
+	float GetFadeAlpha(float CurrentTime) const;
+
 	FMatrix DecalViewProjection;
 	FWorldBox WorldOBB;
 	FBox WorldBounds;
@@ -40,6 +43,8 @@ public:
 	float FadeScreenSize = 0.0f;
 	float InvFadeDuration = -1.0f;
 	float InvFadeInDuration = 1.0f;
+	float FadeStartDelayNormalized = 0.0f;
+	float FadeInStartDelayNormalized = 0.0f;
 	FColor DecalColor;
 	bool DrawInGame = true;	
 };

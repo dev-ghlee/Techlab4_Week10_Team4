@@ -5,7 +5,7 @@ cbuffer ObjectConstants : register(b0)
     float4x4 World;
 };
 
-cbuffer ViewConstants : register(b1)
+cbuffer ViewConstants : register(b4)
 {
     float4x4 ViewProjection;
 };
@@ -44,7 +44,7 @@ PSInput mainVS(VSInput input)
     float4 WorldPosition = mul(float4(input.Position, 1.0f), World);
     
     Output.Position = mul(WorldPosition, ViewProjection);
-    Output.Position.z -= 0.00001f * Output.Position.w;
+    Output.Position.z -= 0.00001f * Output.Position.w; // Avoid z-fighting
     Output.DecalClipPosition = mul(WorldPosition, DecalViewProjection);
     Output.WorldNormal = mul(float4(input.Normal, 0.0f), World).xyz;
     Output.WorldPosition = WorldPosition.xyz;
@@ -63,22 +63,21 @@ float4 mainPS(PSInput input) : SV_TARGET
         discard;
     }
     
-    float angleCos = dot(normalize(input.WorldNormal), -DecalForward.xyz);
-    if (angleCos <= 0.0f)
-    {
-        discard;
-    }
+    //float angleCos = dot(normalize(input.WorldNormal), -DecalForward.xyz);
+
+    float Margin = 0.2f;    
+    float FadeZ = smoothstep(1.0f, 1.0f - Margin, abs(DecalNDC.z * 2.0f - 1.0f));    
     
     float2 DecalUV;
     DecalUV.x = DecalNDC.x * 0.5f + 0.5f;
     DecalUV.y = -DecalNDC.y * 0.5f + 0.5f;
     
     float4 DecalColorSample = DecalTexture.Sample(ClampSampler, DecalUV);
+    DecalColorSample.rgb = pow(max(DecalColorSample.rgb, 0.0f), 2.2f); // Convert from sRGB to linear space
     DecalColorSample.rgb *= DecalColor.rgb;
+    DecalColorSample.a *= DecalColor.a * FadeZ;
     
-    // TODO : decrease alpha based on distance from decal center
-    
-    Result = float4(DecalColorSample.xyz, 1.0f);
+    Result = float4(DecalColorSample.xyz, DecalColorSample.a);
     
     return Result;
 }

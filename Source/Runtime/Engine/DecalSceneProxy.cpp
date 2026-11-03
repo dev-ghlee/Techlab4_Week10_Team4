@@ -54,8 +54,39 @@ void FDecalSceneProxy::UpdateRenderState()
 	DecalMaterial = Component->GetDecalMaterial();
 	DecalColor = Component->DecalColor;
 	SortOrder = Component->SortOrder;
-	FadeScreenSize = Component->FadeScreenSize > 0.0f ? 1.0f / Component->FadeScreenSize : 0.0f;
+	FadeScreenSize = Component->FadeScreenSize;
 	InvFadeDuration = Component->FadeDuration > 0.0f  ? 1.0f / Component->FadeDuration : 0.0f;
-	InvFadeInDuration = 1.0f / Component->FadeInDuration;
+	InvFadeInDuration = Component->FadeInDuration > 0.0f ? 1.0f / Component->FadeInDuration : 0.0f;
 	DrawInGame = Component->IsVisible() && !Component->IsHiddenInGame();
+}
+
+void FDecalSceneProxy::InitializeFadingParameters(float AbsSpawnTime, float FadeDuration, float FadeStartDelay, float FadeInDuration, float FadeInStartDelay)
+{
+	if(FadeDuration > 0.0f)
+	{
+		InvFadeDuration = 1.0f / FadeDuration;
+		FadeStartDelayNormalized = (AbsSpawnTime + FadeStartDelay + FadeDuration) * InvFadeDuration;
+	}
+	if(FadeInDuration > 0.0f)
+	{
+		InvFadeInDuration = 1.0f / FadeInDuration;
+		FadeInStartDelayNormalized = (AbsSpawnTime + FadeInStartDelay) * -InvFadeInDuration;
+	}
+}
+
+float FDecalSceneProxy::GetFadeAlpha(float CurrentTime) const
+{
+	float InAlpha = 1.0f;
+	if(InvFadeInDuration > 0.0f)
+	{
+		InAlpha = FMath::Clamp((CurrentTime * InvFadeInDuration) + FadeInStartDelayNormalized, 0.0f, 1.0f);
+	}
+
+	float OutAlpha = 1.0f;
+	if(InvFadeDuration > 0.0f)
+	{
+		OutAlpha = FMath::Clamp((-CurrentTime * InvFadeDuration) + FadeStartDelayNormalized, 0.0f, 1.0f);
+	}
+
+	return InAlpha * OutAlpha;
 }
