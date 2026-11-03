@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <limits>
 #include <system_error>
+#include <utility>
 
 // Mesh Node와 해당 Skin, Cluster의 연결 관계.
 // 모든 포인터는 SDK 객체를 참조하며 소유하지 않는다.
@@ -469,6 +470,117 @@ bool FFbxImporter::BuildTangentSpace(FSkeletalMeshData& MeshData, FString& OutEr
 
 		const float Handedness = Orientation < 0.0f ? -1.0f : 1.0f;
 		Vertex.Tangent = FVector4(Tangent, Handedness);
+	}
+
+	return true;
+}
+
+bool FFbxImporter::ValidateSkeletalMeshData(const FSkeletalMeshData& MeshData, FString& OutError)
+{
+	OutError.clear();
+
+	const int32 VertexCount = MeshData.ReferenceVertices.Num();
+	const int32 IndexCount = MeshData.Indices.Num();
+	const int32 BoneCount = MeshData.RefSkeleton.RawRefBoneInfo.Num();
+
+	if (VertexCount == 0 || IndexCount == 0 || IndexCount % 3 != 0)
+	{
+		OutError = "Skeletal mesh requires vertices and triangle indices.";
+		return false;
+	}
+
+	// 같은 정점 인덱스로 원본 정점과 스키닝 정보를 읽을 수 있어야 한다.
+	if (MeshData.SkinWeights.Num() != VertexCount)
+	{
+		OutError = "Skin weight count does not match the vertex count.";
+		return false;
+	}
+
+	// 같은 본 인덱스로 본 정보·기준 포즈·역바인드를 읽어야 한다.
+	if (BoneCount == 0
+		|| MeshData.RefSkeleton.RawRefBonePose.Num() != BoneCount
+		|| MeshData.RefBasesInvMatrix.Num() != BoneCount)
+	{
+		OutError = "Bone information, reference pose and inverse bind counts must match.";
+		return false;
+	}
+
+	for (int32 BoneIndex = 0; BoneIndex < BoneCount; ++BoneIndex)
+	{
+		const int32 ParentIndex = MeshData.RefSkeleton.RawRefBoneInfo[BoneIndex].ParentIndex;
+
+		// 현재 규약은 0번 본 하나를 루트로 사용한다.
+		// 나머지 본의 부모는 반드시 자신보다 먼저 저장되어야 한다.
+		if ((BoneIndex == 0 && ParentIndex != -1)
+			|| (BoneIndex > 0 && (ParentIndex < 0 || ParentIndex >= BoneIndex)))
+		{
+			OutError = "Invalid parent bone index or bone hierarchy order.";
+			return false;
+		}
+	}
+
+	for (uint32 VertexIndex : MeshData.Indices)
+	{
+		if (VertexIndex >= static_cast<uint32>(VertexCount))
+		{
+			OutError = "Triangle index is outside the reference vertex array.";
+			return false;
+		}
+	}
+
+	for (const FSkinWeightInfo& SkinWeight : MeshData.SkinWeights)
+	{
+		for (uint32 InfluenceIndex = 0; InfluenceIndex < MaxBoneInfluences; ++InfluenceIndex)
+		{
+			const int32 BoneIndex = SkinWeight.InfluenceBones[InfluenceIndex];
+
+			// Weight가 0인 미사용 슬롯의 본 인덱스는 검사하지 않는다.
+			if (SkinWeight.InfluenceWeights[InfluenceIndex] > 0.0f
+				&& (BoneIndex < 0 || BoneIndex >= BoneCount))
+			{
+				OutError = "Skin weight references an invalid bone index.";
+				return false;
+			}
+		}
+	}
+
+	if (MeshData.Sections.IsEmpty() || MeshData.MaterialSlots.IsEmpty())
+	{
+		OutError = "Skeletal mesh requires render sections and material slots.";
+		return false;
+	}
+
+	// 앞 Section의 끝과 다음 Section의 시작이 같으면 겹침·누락이 없다.
+	uint64 ExpectedBaseIndex = 0;
+
+	for (const FSkelMeshRenderSection& Section : MeshData.Sections)
+	{
+		// 곱셈과 덧셈에서 uint32 오버플로가 발생하지 않도록 확장한다.
+		const uint64 SectionIndexCount = static_cast<uint64>(Section.NumTriangles) * 3;
+		const uint64 SectionEnd = static_cast<uint64>(Section.BaseIndex) + SectionIndexCount;
+
+		if (Section.NumTriangles == 0
+			|| Section.BaseIndex != ExpectedBaseIndex
+			|| SectionEnd > static_cast<uint64>(IndexCount))
+		{
+			OutError = "Section index ranges are invalid, overlapping or incomplete.";
+			return false;
+		}
+
+		if (Section.MaterialIndex >= MeshData.MaterialSlots.Num())
+		{
+			OutError = "Section references an invalid material slot.";
+			return false;
+		}
+
+		ExpectedBaseIndex = SectionEnd;
+	}
+
+	// 마지막 Section까지 모든 삼각형 인덱스를 포함해야 한다.
+	if (ExpectedBaseIndex != static_cast<uint64>(IndexCount))
+	{
+		OutError = "Sections do not cover the entire index array.";
+		return false;
 	}
 
 	return true;
@@ -1524,11 +1636,16 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 
 	ImportedData.ReferenceBounds = ReferenceBounds;
 
-	// 이후 여기에 최종 유효성 검사를 추가한다.
-	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
-	OutError = "Skeletal mesh data extraction is not implemented yet.";
+	if (!ValidateSkeletalMeshData(ImportedData, OutError))
+	{
+		return false;
+	}
 
-	return false;
+	// 모든 추출과 검사가 성공했을 때만 호출자의 결과를 교체한다.
+	// 이동 대입으로 정점·인덱스 등의 큰 배열을 복사하지 않고 전달한다.
+	OutData = std::move(ImportedData);
+
+	return true;
 }
 
 void FFbxImporter::LoadSceneRecursive(FbxNode* Node, FImportContext& Context)

@@ -74,6 +74,7 @@ struct FSkeletalMeshData
 	TArray<FSkinWeightInfo> SkinWeights;
 
 	// 재질별로 구분한 인덱스 구간.
+	// 인덱스 구간 순서로 저장하며 모든 인덱스를 겹침 없이 포함한다.
 	TArray<FSkelMeshRenderSection> Sections;
 
 	// 실제 재질 생성에 필요한 이름, 색상, 텍스처 경로.
