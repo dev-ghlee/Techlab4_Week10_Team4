@@ -109,6 +109,7 @@ void UPrimitiveComponent::SetCastShadow(bool NewValue)
 	if (bCastShadow != NewValue)
 	{
 		bCastShadow = NewValue;
+		MarkRenderStateDirty();
 	}
 }
 
@@ -117,6 +118,7 @@ void UPrimitiveComponent::SetReceiveShadow(bool NewValue)
 	if (bReceiveShadow != NewValue)
 	{
 		bReceiveShadow = NewValue;
+		MarkRenderStateDirty();
 	}
 }
 

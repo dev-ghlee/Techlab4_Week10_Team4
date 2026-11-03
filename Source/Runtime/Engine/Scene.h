@@ -37,6 +37,8 @@ public:
 	// Point·Spot·Rect를 한 배열로 다룬다. 종류는 GetLightShaderParameters가 채우는 Type으로 구분한다.
 	const TArray<FLocalLightSceneProxy*>& GetLocalLights() const { return LocalLightProxies; }
 
+	// CPU 스키닝/버퍼 갱신 후 UpdateAllTransforms로 변형 Bounds와 BVH를 반영한다.
+	void UpdateDynamicData();
 	void UpdateAllTransforms();
 
 	void BuildBVH();

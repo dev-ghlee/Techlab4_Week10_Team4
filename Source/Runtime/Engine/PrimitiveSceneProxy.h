@@ -17,6 +17,8 @@ public:
 	explicit FPrimitiveSceneProxy(UPrimitiveComponent* InComponent);
 	
 	virtual ~FPrimitiveSceneProxy();
+	// 컬링 전에 메인 스레드에서 실행한다. 정적 프리미티브는 갱신할 동적 데이터가 없다.
+	virtual void UpdateDynamicData() {}
 	void UpdateTransform();
 	virtual void UpdateRenderState();
 	virtual FBox GetLocalBounds() const;

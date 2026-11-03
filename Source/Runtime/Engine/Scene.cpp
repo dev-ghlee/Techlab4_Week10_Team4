@@ -206,6 +206,12 @@ const FSkyLightEnvironment* FScene::FindSkyLightEnvironment(const FString& Sourc
 
 
 
+void FScene::UpdateDynamicData()
+{
+	for (FPrimitiveSceneProxy* Proxy : PrimitiveSceneProxies)
+		Proxy->UpdateDynamicData();
+}
+
 void FScene::UpdateAllTransforms()
 {
 	for (FPrimitiveSceneProxy* Proxy : RenderStateDirtyProxies)

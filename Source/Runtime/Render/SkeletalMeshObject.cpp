@@ -14,6 +14,7 @@ FSkeletalMeshObject::FSkeletalMeshObject(const FSkeletalMeshData& InMeshData, FI
 
 FSkeletalMeshObject::~FSkeletalMeshObject() = default;
 
+// 본 행렬로 CPU 정점과 경계를 갱신한다. GPU 전송은 UploadSkinnedVertices에서 수행한다.
 bool FSkeletalMeshObject::UpdateDynamicData(const TArray<FMatrix>& BoneComponentMatrices)
 {
 	if (BoneComponentMatrices.Num() != MeshData.RefBasesInvMatrix.Num()) return false;
@@ -24,14 +25,16 @@ bool FSkeletalMeshObject::UpdateDynamicData(const TArray<FMatrix>& BoneComponent
 	return true;
 }
 
+// 기준 자세의 정점을 바인드 당시 본 공간으로 옮긴 뒤, 현재 본 자세를 적용하는 행렬을 만든다.
+// 계산 결과는 메시 기준이며, 컴포넌트의 월드 변환은 렌더러가 적용한다.
 void FSkeletalMeshObject::BuildSkinningMatrices(const TArray<FMatrix>& BoneComponentMatrices)
 {
-	// 메시 로컬 -> 바인드 본 로컬 -> 현재 Component Space. World 변환은 렌더러가 적용한다.
 	for (int32 BoneIndex = 0; BoneIndex < MeshData.RefBasesInvMatrix.Num(); ++BoneIndex)
 		SkinningMatrices[BoneIndex] = MeshData.RefBasesInvMatrix[BoneIndex]
 			* BoneComponentMatrices[BoneIndex];
 }
 
+// 정점에 연결된 본의 변환을 Weight만큼 섞어 위치·노멀·탄젠트를 계산한다.
 void FSkeletalMeshObject::SkinVerticesCPU()
 {
 	for (int32 VertexIndex = 0; VertexIndex < MeshData.ReferenceVertices.Num(); ++VertexIndex)
@@ -62,7 +65,8 @@ void FSkeletalMeshObject::SkinVerticesCPU()
 		const FVector CrossYZ = FVector::Cross(YAxis, ZAxis);
 		const float Handedness = XAxis.Dot(CrossYZ) < 0.0f ? -1.0f : 1.0f;
 
-		// 노멀은 역전치 방향으로 변환한다. 여인수로 계산해 정점마다 역행렬을 만들지 않는다.
+		// 비균일 스케일에서도 표면에 수직인 방향을 유지하도록 노멀을 역전치로 변환한다.
+		// 외적을 이용하면 역행렬을 직접 구하지 않고 같은 방향을 얻을 수 있다.
 		FVector Normal = (CrossYZ * Source.Normal.X
 			+ FVector::Cross(ZAxis, XAxis) * Source.Normal.Y
 			+ FVector::Cross(XAxis, YAxis) * Source.Normal.Z) * Handedness;
@@ -70,8 +74,9 @@ void FSkeletalMeshObject::SkinVerticesCPU()
 
 		const FVector SourceTangent(Source.Tangent.X, Source.Tangent.Y, Source.Tangent.Z);
 		FVector Tangent = BlendedMatrix.TransformVector(SourceTangent);
+		// 노멀 방향 성분을 제거해 탄젠트가 표면에 평행하도록 맞춘다.
 		Tangent -= Dest.Normal * Tangent.Dot(Dest.Normal);
-		// LBS로 방향이 상쇄되면 노멀에 수직인 축을 사용해 유효한 탄젠트를 유지한다.
+		// 본 변환을 섞으면서 탄젠트가 사라지면 노멀에 수직인 방향을 새로 잡는다.
 		if (Tangent.SizeSquared() < SMALL_NUMBER)
 		{
 			const FVector Axis = std::abs(Dest.Normal.Z) < 0.9f ? FVector(0, 0, 1) : FVector(0, 1, 0);
@@ -81,6 +86,7 @@ void FSkeletalMeshObject::SkinVerticesCPU()
 	}
 }
 
+// 변형된 정점을 모두 포함하는 경계 상자를 구해 컬링과 그림자 범위 계산에 사용한다.
 void FSkeletalMeshObject::UpdateLocalBounds()
 {
 	LocalBounds.Min = LocalBounds.Max = SkinnedVertices[0].Position;
@@ -91,6 +97,7 @@ void FSkeletalMeshObject::UpdateLocalBounds()
 	}
 }
 
+// 첫 업로드에 필요한 동적 정점 버퍼를 한 번만 생성한다.
 bool FSkeletalMeshObject::InitializeResources()
 {
 	if (!IndexBuffer) return false;
@@ -103,6 +110,7 @@ bool FSkeletalMeshObject::InitializeResources()
 	return true;
 }
 
+// 변형한 정점 전체를 GPU에 옮기고, 성공하면 업로드 대기 상태를 해제한다.
 bool FSkeletalMeshObject::UploadSkinnedVertices()
 {
 	if (!bVertexBufferDirty) return true;

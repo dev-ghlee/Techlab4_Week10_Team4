@@ -228,6 +228,8 @@ void UWorld::ClearWorld()
 
 void UWorld::GatherRenderPackets(FRenderQueue& RenderQueue, const FViewContext* LODView, const FFrustumPlanes* Frustum, FRenderer* Renderer)
 {
+	Scene.UpdateDynamicData();
+	Scene.UpdateAllTransforms();
 	// 멤버로 두어 매 프레임 용량을 재사용한다.
 	RenderStats.Reset();
 	VisibleProxies.Reset();
@@ -433,6 +435,13 @@ void UWorld::GatherRenderPackets(FRenderQueue& RenderQueue, const FViewContext* 
 				else
 				{
 					Proxy->GatherMeshElements(RenderQueue, LODView ? *LODView : FViewContext{});
+				}
+
+				if (Proxy->GetRenderState() && FirstNew < static_cast<uint32>(RenderQueue.Num()))
+				{
+					++RenderStats.LODCounts[0];
+					for (uint32 p = FirstNew; p < static_cast<uint32>(RenderQueue.Num()); ++p)
+						RenderStats.LODTriangles[0] += RenderQueue[p].IndexCount / 3;
 				}
 
 				// continue 없이 항상 여기까지 와서 새 패킷에 여유 칸을 배정한다.

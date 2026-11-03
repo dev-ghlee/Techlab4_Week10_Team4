@@ -46,6 +46,7 @@ const TArray<FMatrix>& USkinnedMeshComponent::GetBoneComponentMatrices() const
 	return BoneComponentMatrices;
 }
 
+// 부모 본을 기준으로 편집한 자세를 저장하고, 본 행렬과 스키닝 결과를 다시 계산하도록 표시한다.
 void USkinnedMeshComponent::SetBoneLocalTransform(int32 BoneIndex, const FTransform& NewTransform)
 {
 	if (!BoneLocalTransforms.IsValidIndex(BoneIndex)) return;
@@ -53,6 +54,7 @@ void USkinnedMeshComponent::SetBoneLocalTransform(int32 BoneIndex, const FTransf
 	MarkPoseDirty();
 }
 
+// Gizmo에서 받은 월드 행렬을 부모 본 기준의 위치·회전·크기로 바꿔 저장한다.
 void USkinnedMeshComponent::SetBoneWorldTransform(int32 BoneIndex, const FMatrix& NewWorldMatrix)
 {
 	if (!BoneLocalTransforms.IsValidIndex(BoneIndex)) return;
@@ -95,9 +97,9 @@ void USkinnedMeshComponent::SetBoneWorldTransform(int32 BoneIndex, const FMatrix
 	MarkPoseDirty();
 }
 
+// 리소스의 기준 자세를 복사해 이 컴포넌트가 편집할 본 자세를 준비한다.
 void USkinnedMeshComponent::InitializePose()
 {
-	// 메시 지정/해제와 기준 포즈 복구에서 공통으로 사용한다.
 	BoneLocalTransforms.Reset();
 	BoneComponentMatrices.Reset();
 	if (const FSkeletalMeshData* Data = GetSkinnedMeshData())
@@ -114,12 +116,14 @@ void USkinnedMeshComponent::ResetToReferencePose()
 	InitializePose();
 }
 
+// 본 행렬 갱신과 정점 스키닝은 각각 필요할 때 수행하므로 두 상태를 함께 표시한다.
 void USkinnedMeshComponent::MarkPoseDirty()
 {
 	bBoneTransformsDirty = true;
 	bPoseDirty = true;
 }
 
+// 부모부터 변환을 누적해, 메시를 기준으로 한 각 본의 현재 행렬을 구한다.
 void USkinnedMeshComponent::RefreshBoneTransforms() const
 {
 	if (!bBoneTransformsDirty) return;

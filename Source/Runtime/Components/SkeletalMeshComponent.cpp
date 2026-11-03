@@ -1,6 +1,14 @@
 #include "EnginePCH.h"
 #include "SkeletalMeshComponent.h"
+#include "Engine/SkeletalMeshSceneProxy.h"
 
+FPrimitiveSceneProxy* USkeletalMeshComponent::CreateSceneProxy()
+{
+	// 메시가 아직 없어도 Proxy를 유지해 이후 SetSkeletalMesh 호출을 반영한다.
+	return new FSkeletalMeshSceneProxy(this);
+}
+
+// 이전 메시의 출력 버퍼를 비우고, 새 메시의 기준 자세로 본을 초기화한다.
 void USkeletalMeshComponent::SetSkeletalMesh(USkeletalMesh* InMesh)
 {
 	if (SkeletalMesh == InMesh) return;
@@ -19,6 +27,8 @@ void USkeletalMeshComponent::SetSkeletalMesh(USkeletalMesh* InMesh)
 	OnTransformDirty();
 }
 
+// 현재 본 자세로 정점을 변형하고 GPU 버퍼에 반영하는 진입점이다.
+// 컬링 전에 호출하며, 자세가 바뀌지 않았으면 이전 결과를 재사용한다.
 bool USkeletalMeshComponent::UpdateSkinnedMesh()
 {
 	if (!SkeletalMesh) return false;
@@ -26,11 +36,11 @@ bool USkeletalMeshComponent::UpdateSkinnedMesh()
 	if (!MeshObject)
 		MeshObject = MakeUnique<FSkeletalMeshObject>(SkeletalMesh->GetMeshData(), SkeletalMesh->GetIndexBuffer());
 	if (!MeshObject->UpdateDynamicData(GetBoneComponentMatrices())) return false;
+	// 본만 움직여도 CPU 계산 결과의 Bounds와 그림자 캐시를 갱신한다.
+	OnTransformDirty();
 	if (!MeshObject->UploadSkinnedVertices()) return false;
 	// 업로드까지 성공한 자세만 반영 완료로 처리한다.
 	bPoseDirty = false;
-	// 본만 움직여도 변형 Bounds와 그림자 캐시를 갱신해야 한다.
-	OnTransformDirty();
 	return true;
 }
 
@@ -58,6 +68,7 @@ UMaterial* USkeletalMeshComponent::GetDefaultMaterial(int32 SlotIndex) const
 	return SkeletalMesh->GetMaterial(static_cast<uint32>(SlotIndex));
 }
 
+// 스키닝 결과가 있으면 변형된 경계를, 아직 준비 전이면 원본 메시의 경계를 반환한다.
 FBox USkeletalMeshComponent::CalcLocalBounds() const
 {
 	if (MeshObject) return MeshObject->GetLocalBounds();
