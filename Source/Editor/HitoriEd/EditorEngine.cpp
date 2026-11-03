@@ -419,7 +419,7 @@ void UEditorEngine::HandleSkeletalMeshPreviewInput()
 	{
 		FString Error;
 		USkeletalMesh* Mesh = UAssetManager::Get().LoadFbxSkeletalMesh(
-			"Models/Rigged_Man/SKM_Manny_Simple.fbx", "Assets/Models/Rigged_Man/SKM_Manny_Simple.fbx", Error);
+			"Models/Rigged_Man/SKM_Manny_Simple.fbx", "Assets/Models/Skeleton/SKM_Manny_Simple.fbx", Error);
 		if (!Mesh)
 		{
 			HTR_LOG(Error, "Rigged_Man preview: {}", Error);
@@ -437,14 +437,11 @@ void UEditorEngine::HandleSkeletalMeshPreviewInput()
 		Component->ResetToReferencePose();
 		OutlinerPanel->SelectActor(Actor);
 
-		// FBX의 cm 단위 크기에 맞춰 활성 뷰의 카메라를 메시 중심에 맞춘다.
+		// 메시 크기에 맞춰 활성 뷰의 카메라와 클리핑 범위를 조정한다.
 		if (FEditorViewportClient* Client = ViewportsPanel->GetViewportClient(ViewportsPanel->GetActiveViewIndex()))
 		{
 			const FBox Bounds = Component->CalcLocalBounds().GetWorldAABB(Component->GetWorldMatrix());
-			const FVector Center = (Bounds.Min + Bounds.Max) * 0.5f;
-			const float Radius = FMath::Max((Bounds.Max - Bounds.Min).Size() * 0.5f, 1.0f);
-			Client->SetViewLocation(Center - Client->GetViewForward() * (Radius * 3.0f));
-			Client->SetOrthoWidth(Radius * 3.0f);
+			Client->FocusBounds(Bounds);
 		}
 		HTR_LOG(Info, "Rigged_Man preview ready. F7: rotate bone, F9: reference pose.");
 		return;

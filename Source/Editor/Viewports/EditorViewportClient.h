@@ -15,6 +15,7 @@
 class UWorld;
 class FGizmo;
 class AActor;
+struct FBox;
 
 
 // 뷰포트 투영 타입
@@ -83,6 +84,9 @@ public:
 
 	float GetAspectRatio() const { return AspectRatio; }
 	void SetAspectRatio(float InAspectRatio) { AspectRatio = InAspectRatio; }
+
+	// 현재 시선 방향을 유지하며 월드 경계 전체가 보이도록 카메라를 맞춘다.
+	void FocusBounds(const FBox& WorldBounds);
 
 	// 카메라 입력 처리
 	void TickInput(float DeltaTime, bool bCaptured, bool bHovered,
@@ -161,7 +165,8 @@ protected:
 	float ViewFOV = 60.0f;
 	float AspectRatio = 1.777778f;
 	float NearClip = 0.1f;
-	float FarClip = 10000.0f;
+	static constexpr float DefaultFarClip = 10000.0f;
+	float FarClip = DefaultFarClip;
 	float OrthoWidth = 10.0f;
 	float MaxRange = 50.0f;
 };

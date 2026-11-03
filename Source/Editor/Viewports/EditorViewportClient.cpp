@@ -6,10 +6,47 @@
 #include "GameFramework/Actor.h"
 #include "Input/InputSystem.h"
 #include "Camera/ViewportCameraMovement.h"
+#include "Math/Box.h"
 #include "Math/EngineMath.h"
 #include "Render/RenderCommand.h"
 
+#include <cmath>
+
 FEditorViewportClient::FEditorViewportClient() {}
+
+void FEditorViewportClient::FocusBounds(const FBox& WorldBounds) {
+  for (int32 Axis = 0; Axis < 3; ++Axis) {
+    if (!std::isfinite(WorldBounds.Min[Axis]) ||
+        !std::isfinite(WorldBounds.Max[Axis]) ||
+        WorldBounds.Min[Axis] > WorldBounds.Max[Axis]) {
+      return;
+    }
+  }
+
+  const FVector Center = (WorldBounds.Min + WorldBounds.Max) * 0.5f;
+  const float Radius = FMath::Max(
+      (WorldBounds.Max - WorldBounds.Min).Size() * 0.5f, 1.0f);
+  const float FramingRadius = Radius * 1.1f;
+  const float SafeAspectRatio = FMath::Max(AspectRatio, 0.01f);
+
+  // 직교 뷰는 화면 크기를 OrthoWidth로 정하고, 모델 앞에 카메라를 둔다.
+  float CameraDistance = FramingRadius + FMath::Max(FramingRadius, NearClip);
+  if (bIsPerspective) {
+    const float VerticalHalfFOV = FMath::DegreesToRadians(
+        FMath::Clamp(ViewFOV, 1.0f, 179.0f) * 0.5f);
+    const float LimitingHalfFOV = std::atan(
+        std::tan(VerticalHalfFOV) * FMath::Min(SafeAspectRatio, 1.0f));
+
+    // 가로·세로 중 좁은 시야에 경계 구 전체가 들어오는 거리다.
+    CameraDistance = FMath::Max(
+        FramingRadius / std::sin(LimitingHalfFOV), FramingRadius + NearClip);
+  }
+
+  ViewLocation = Center - GetViewForward() * CameraDistance;
+  OrthoWidth = 2.0f * FramingRadius * FMath::Max(SafeAspectRatio, 1.0f);
+  // 이전 모델의 크기에 누적되지 않도록 기본값을 하한으로 다시 계산한다.
+  FarClip = FMath::Max(DefaultFarClip, CameraDistance + FramingRadius);
+}
 
 void FEditorViewportClient::TickInput(float DeltaTime, bool bCaptured,
                                       bool bHovered, int32 WheelDelta,
