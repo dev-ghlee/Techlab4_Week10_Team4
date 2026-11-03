@@ -133,7 +133,7 @@ UAssetManager& UAssetManager::Get()
 	return *Instance;
 }
 
-TUniquePtr<UMaterial> UAssetManager::CreateSkeletalMaterial(const FStaticMaterialSlot& Slot, FString& OutError)
+TUniquePtr<UMaterial> UAssetManager::CreateSkeletalMaterial(const FMeshMaterialSlot& Slot, FString& OutError)
 {
 	OutError.clear();
 

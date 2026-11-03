@@ -19,7 +19,7 @@ class UStaticMesh;
 class USkeletalMesh;
 class UMaterial;
 class USoundWave;
-struct FStaticMaterialSlot;
+struct FMeshMaterialSlot;
 struct FSkeletalMeshData;
 
 namespace fs = std::filesystem;
@@ -86,7 +86,7 @@ public:
 
 private:
 	// 슬롯의 색상과 텍스처 정보로 실제 재질을 생성한다.
-	TUniquePtr<UMaterial> CreateSkeletalMaterial(const FStaticMaterialSlot& Slot, FString& OutError);
+	TUniquePtr<UMaterial> CreateSkeletalMaterial(const FMeshMaterialSlot& Slot, FString& OutError);
 
 	// 검증된 원본 데이터로 공유 메시 리소스를 생성한다.
 	USkeletalMesh* CreateSkeletalMesh(FSkeletalMeshData&& MeshData, FString& OutError);
