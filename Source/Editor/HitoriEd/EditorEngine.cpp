@@ -49,6 +49,7 @@
 #include <sol/sol.hpp>
 
 #include "Components/ShapeComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 
 #include "Physics/Collision.h"
 
@@ -386,6 +387,94 @@ void UEditorEngine::BeginFrame(const float DeltaTime)
 
 	if (!ImGui::GetIO().WantTextInput && FInputSystem::IsKeyPressed(EKeyCode::Delete))
 		DeleteActor(OutlinerPanel->GetSelectedActor());
+
+	HandleSkeletalMeshPreviewInput();
+}
+
+// F6: 모델 표시, F7: 본 회전, F9: 기준 자세 복구. 플레이 중에는 게임 입력을 건드리지 않는다.
+void UEditorEngine::HandleSkeletalMeshPreviewInput()
+{
+	if (PlayWorld || ImGui::GetIO().WantTextInput
+		|| ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopup)) return;
+	const bool bLoad = FInputSystem::IsKeyPressed(EKeyCode::F6);
+	const bool bRotate = FInputSystem::IsKeyPressed(EKeyCode::F7);
+	const bool bReset = FInputSystem::IsKeyPressed(EKeyCode::F9);
+	if (!bLoad && !bRotate && !bReset) return;
+
+	// 선택된 액터에서 매번 찾아 씬 변경이나 액터 삭제 후에도 포인터가 남지 않게 한다.
+	AActor* Actor = OutlinerPanel->GetSelectedActor();
+	USkeletalMeshComponent* Component = nullptr;
+	if (Actor)
+		for (UActorComponent* Candidate : Actor->GetComponents())
+			if ((Component = Cast<USkeletalMeshComponent>(Candidate))) break;
+
+	if (bLoad)
+	{
+		FString Error;
+		USkeletalMesh* Mesh = UAssetManager::Get().LoadFbxSkeletalMesh(
+			"Models/Rigged_Man/SKM_Manny_Simple.fbx", "Assets/Models/Skeleton/SKM_Manny_Simple.fbx", Error);
+		if (!Mesh)
+		{
+			HTR_LOG(Error, "Rigged_Man preview: {}", Error);
+			return;
+		}
+		if (!Component)
+		{
+			const FName Name = MakeUniqueObjectName(EditorWorld->GetPersistentLevel(),
+				AActor::StaticClass(), "RiggedManPreview");
+			Actor = EditorWorld->SpawnActor<AActor>(Name);
+			Component = Cast<USkeletalMeshComponent>(Actor->AddComponent(
+				USkeletalMeshComponent::StaticClass(), "SkeletalMeshComponent"));
+		}
+		Component->SetSkeletalMesh(Mesh);
+		Component->ResetToReferencePose();
+		OutlinerPanel->SelectActor(Actor);
+
+		// 메시 크기에 맞춰 활성 뷰의 카메라와 클리핑 범위를 조정한다.
+		if (FEditorViewportClient* Client = ViewportsPanel->GetViewportClient(ViewportsPanel->GetActiveViewIndex()))
+		{
+			const FBox Bounds = Component->CalcLocalBounds().GetWorldAABB(Component->GetWorldMatrix());
+			Client->FocusBounds(Bounds);
+		}
+		HTR_LOG(Info, "Rigged_Man preview ready. F7: rotate bone, F9: reference pose.");
+		return;
+	}
+
+	if (!Component || !Component->GetSkeletalMesh()) return;
+	if (bReset)
+	{
+		Component->ResetToReferencePose();
+		HTR_LOG(Info, "Rigged_Man preview: reference pose restored.");
+		return;
+	}
+
+	// 실제 정점에 가장 많이 영향을 주는 자식 본을 골라 눈에 띄는 변형을 만든다.
+	const FSkeletalMeshData& Data = Component->GetSkeletalMesh()->GetMeshData();
+	TArray<float> BoneWeights;
+	BoneWeights.SetNum(Component->GetNumBones());
+	for (const FSkinWeightInfo& Weights : Data.SkinWeights)
+		for (uint32 i = 0; i < MaxBoneInfluences; ++i)
+			if (Weights.InfluenceWeights[i] > 0.0f)
+				BoneWeights[Weights.InfluenceBones[i]] += Weights.InfluenceWeights[i];
+	int32 BoneIndex = INDEX_NONE;
+	float LargestWeight = 0.0f;
+	for (int32 i = 1; i < BoneWeights.Num(); ++i)
+		if (BoneWeights[i] > LargestWeight)
+		{
+			BoneIndex = i;
+			LargestWeight = BoneWeights[i];
+		}
+	if (BoneIndex == INDEX_NONE && BoneWeights[0] > 0.0f) BoneIndex = 0;
+	if (BoneIndex == INDEX_NONE)
+	{
+		HTR_LOG(Warning, "Rigged_Man preview: mesh has no weighted vertices.");
+		return;
+	}
+	FTransform Pose = Component->GetBoneLocalTransform(BoneIndex);
+	Pose.Rotation.Yaw += 30.0f;
+	Component->SetBoneLocalTransform(BoneIndex, Pose);
+	HTR_LOG(Info, "Rigged_Man preview: bone '{}' yaw +30 degrees.",
+		Data.RefSkeleton.RawRefBoneInfo[BoneIndex].Name.ToString());
 }
 
 // 패널 요청과 입력을 뷰포트 클라이언트에 전달해 레이아웃과 카메라 상태를 갱신한다.

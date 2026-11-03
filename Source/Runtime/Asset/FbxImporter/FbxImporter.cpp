@@ -10,6 +10,7 @@
 #include <cmath>
 #include <fbxsdk.h>
 #include <filesystem>
+#include <format>
 #include <limits>
 #include <system_error>
 #include <utility>
@@ -80,6 +81,37 @@ struct FImportContext
 	TMap<FbxNode*, TArray<uint32>> MeshPolygonVertexIndices;
 };
 
+// 같은 메시 또는 같은 본의 바인드 행렬을 성분별 절대 오차로 비교한다.
+template <typename MatrixType>
+static bool AreBindMatricesNearlyEqual(const MatrixType& First, const MatrixType& Second)
+{
+	constexpr double TranslationToleranceCm = 1e-3;
+	constexpr double LinearTolerance = 1e-4;
+	constexpr double AffineTolerance = 1e-8;
+
+	for (int32 Row = 0; Row < 4; ++Row)
+	{
+		// FBX SDK 행렬의 마지막 행은 위치 성분이다.
+		const double RowTolerance = Row == 3 ? TranslationToleranceCm : LinearTolerance;
+
+		for (int32 Column = 0; Column < 4; ++Column)
+		{
+			const double FirstValue = First.Get(Row, Column);
+			const double SecondValue = Second.Get(Row, Column);
+
+			// 마지막 열의 아핀 구조 성분은 별도로 검사한다.
+			const double Tolerance = Column == 3 ? AffineTolerance : RowTolerance;
+
+			if (!std::isfinite(FirstValue) || !std::isfinite(SecondValue) || std::abs(FirstValue - SecondValue) > Tolerance)
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
 bool FFbxImporter::IsWithinFloatRange(double Value)
 {
 	return std::isfinite(Value) && std::abs(Value) <= std::numeric_limits<float>::max();
@@ -97,8 +129,10 @@ bool FFbxImporter::ConvertFbxMatrixToTransform(const FbxMatrix& InMatrix, FTrans
 	// 위치·회전·전단·스케일·행렬식 부호를 SDK에서 추출한다.
 	InMatrix.GetElements(Translation, Rotation, Shearing, Scaling, Sign);
 
-	// SDK에서 XYZ 회전각을 구한다. 반환 단위는 도(degree)다.
-	const FbxVector4 Euler = Rotation.DecomposeSphericalXYZ();
+	// 쿼터니언을 회전 행렬로 만든 뒤 XYZ 오일러 각을 추출한다. 반환 단위는 도(degree)다.
+	FbxAMatrix RotationMatrix;
+	RotationMatrix.SetQ(Rotation);
+	const FbxVector4 Euler = RotationMatrix.GetR();
 
 	// 반사 부호가 Scaling에 이미 포함됐다면 중복 적용하지 않는다.
 	const bool bNegativeScale = (Scaling[0] < 0) ^ (Scaling[1] < 0) ^ (Scaling[2] < 0);
@@ -233,8 +267,7 @@ bool FFbxImporter::ReadMaterialBaseColor(FbxSurfaceMaterial* Material, FVector4&
 	return true;
 }
 
-bool FFbxImporter::ReadMaterialTexturePath(
-	const FbxProperty& Property, const FString& FbxPath, FString& OutTexturePath, FString& OutError)
+bool FFbxImporter::ReadMaterialTexturePath(const FbxProperty& Property, const FString& FbxPath, FString& OutTexturePath, FString& OutError, bool bAllowMissingTexture)
 {
 	OutTexturePath.clear();
 
@@ -287,11 +320,20 @@ bool FFbxImporter::ReadMaterialTexturePath(
 		if (std::filesystem::is_regular_file(Candidate, Error))
 		{
 			OutTexturePath = Candidate.generic_string();
+
 			return true;
 		}
 	}
 
+	// 노멀맵 파일이 없으면 빈 경로를 유지해 기본 평면 노멀 텍스처를 사용한다.
+	if (bAllowMissingTexture)
+	{
+		HTR_LOG(Warning, "FBX normal map '{}' missing; using flat normal.", Texture->GetName());
+		return true;
+	}
+
 	OutError = "FBX material texture file was not found.";
+
 	return false;
 }
 
@@ -723,27 +765,8 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		return false;
 	}
 
-	// 교체가 끝난 Scene에서 Mesh를 다시 조회한다.
-	const int32 MeshCount = Scene->GetSrcObjectCount<FbxMesh>();
-	if (MeshCount == 0)
-	{
-		OutError = "FBX scene contains no meshes.";
-		return false;
-	}
-
-	// 각 Mesh의 Polygon이 모두 삼각형인지 확인한다.
-	for (int32 MeshIndex = 0; MeshIndex < MeshCount; ++MeshIndex)
-	{
-		FbxMesh* Mesh = Scene->GetSrcObject<FbxMesh>(MeshIndex);
-
-		if (!Mesh || !Mesh->IsTriangleMesh())
-		{
-			OutError = "FBX mesh triangulation verification failed.";
-			return false;
-		}
-	}
-
-	// 하나의 Context를 재귀 호출 전체에서 공유한다.
+	// 변환 후 노드가 실제로 사용하는 메시를 수집한다.
+	// Scene의 전체 Geometry 목록에는 노드에서 사용하지 않는 원본도 있을 수 있다.
 	FImportContext Context;
 	LoadSceneRecursive(Scene->GetRootNode(), Context);
 
@@ -751,6 +774,22 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 	{
 		OutError = "FBX scene contains no mesh nodes to import.";
 		return false;
+	}
+
+	// 정점 추출에 사용할 Polygon을 직접 확인한다. 빈 메시 노드는 수집 단계에서 제외한다.
+	for (FbxNode* MeshNode : Context.MeshNodes)
+	{
+		FbxMesh* Mesh = MeshNode->GetMesh();
+		for (int32 PolygonIndex = 0; PolygonIndex < Mesh->GetPolygonCount(); ++PolygonIndex)
+		{
+			const int32 PolygonSize = Mesh->GetPolygonSize(PolygonIndex);
+			if (PolygonSize != 3)
+			{
+				OutError = std::format("FBX mesh '{}' polygon {} has {} vertices after triangulation.",
+					MeshNode->GetName(), PolygonIndex, PolygonSize);
+				return false;
+			}
+		}
 	}
 
 	// 수집한 Mesh Node마다 연결된 Skin을 확인한다.
@@ -841,10 +880,13 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		FbxNode* CandidateRoot = nullptr;
 		FbxNode* Node = SkinCluster.Cluster->GetLink();
 
-		// 연결 본의 조상 중 가장 위에 있는 Skeleton Node를 찾는다.
+		// 공통 부모인 Null 노드도 본 계층의 루트로 사용할 수 있다.
 		while (Node && Node != SceneRoot)
 		{
-			if (Node->GetSkeleton())
+			const FbxNodeAttribute* Attribute = Node->GetNodeAttribute();
+			if (Attribute &&
+				(Attribute->GetAttributeType() == FbxNodeAttribute::eSkeleton ||
+				 Attribute->GetAttributeType() == FbxNodeAttribute::eNull))
 			{
 				CandidateRoot = Node;
 			}
@@ -967,15 +1009,17 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 			FbxAMatrix ClusterMeshBind;
 			SkinCluster.Cluster->GetTransformMatrix(ClusterMeshBind);
 
-			// 하나의 Mesh에는 하나의 바인드 배치를 사용한다.
-			if (bHasBindMatrix && MeshBindGlobal != ClusterMeshBind)
+			// 첫 Cluster의 행렬을 비교 기준으로 한 번만 저장한다.
+			if (!bHasBindMatrix)
+			{
+				MeshBindGlobal = ClusterMeshBind;
+				bHasBindMatrix = true;
+			}
+			else if (!AreBindMatricesNearlyEqual(MeshBindGlobal, ClusterMeshBind))
 			{
 				OutError = "FBX mesh contains inconsistent bind transforms.";
 				return false;
 			}
-
-			MeshBindGlobal = ClusterMeshBind;
-			bHasBindMatrix = true;
 		}
 
 		// Skin 연결이 없는 Mesh는 기본 배치를 사용한다.
@@ -1076,7 +1120,7 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		const FbxMatrix BindGlobal(LinkBindGlobal);
 
 		const FbxMatrix* Existing = BoneBindSceneGlobals.Find(BoneNode);
-		if (Existing && *Existing != BindGlobal)
+		if (Existing && !AreBindMatricesNearlyEqual(*Existing, BindGlobal))
 		{
 			OutError = "FBX bone contains inconsistent cluster bind transforms.";
 			return false;
@@ -1105,7 +1149,7 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 
 			const FbxMatrix& BindGlobal = Pose->GetMatrix(EntryIndex);
 			const FbxMatrix* Existing = BoneBindSceneGlobals.Find(BoneNode);
-			if (Existing && *Existing != BindGlobal)
+			if (Existing && !AreBindMatricesNearlyEqual(*Existing, BindGlobal))
 			{
 				OutError = "FBX bind poses contain inconsistent bone transforms.";
 				return false;
@@ -1255,7 +1299,7 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		FbxSkin* Skin = static_cast<FbxSkin*>(
 			MeshNode->GetMesh()->GetDeformer(0, FbxDeformer::eSkin));
 
-		const bool bRigid = Skin->GetSkinningType() == FbxSkin::eRigid;
+		bool bRigid = Skin->GetSkinningType() == FbxSkin::eRigid;
 		const bool bTotalOne = Skin->GetCluster(0)->GetLinkMode() == FbxCluster::eTotalOne;
 
 		for (auto& Influences : MeshInfluences)
@@ -1283,11 +1327,11 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 				return false;
 			}
 
-			// Rigid는 하나의 Control Point에 하나의 본만 영향을 줘야 한다.
-			if (bRigid && MergedWeights.Num() != 1)
+			// 여러 본의 가중치가 있으면 경고 후 선형 스키닝으로 해석한다.
+			if (bRigid && MergedWeights.Num() > 1)
 			{
-				OutError = "Rigid skinning requires one bone per control point.";
-				return false;
+				HTR_LOG(Warning, "FBX '{}': treating rigid skin as linear.", MeshNode->GetName());
+				bRigid = false;
 			}
 
 			// 영향 개수 제한이나 정규화 전에 원본 합계를 검사한다.
@@ -1409,12 +1453,9 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 			const FbxProperty Diffuse = Material->FindProperty(FbxSurfaceMaterial::sDiffuse);
 			const FbxProperty Normal = Material->FindProperty(FbxSurfaceMaterial::sNormalMap);
 
-			if (!ReadMaterialBaseColor(Material, Slot.BaseColor, OutError)
-				|| !ReadMaterialTexturePath(Diffuse, Path, Slot.DiffuseTexturePath, OutError)
-				|| !ReadMaterialTexturePath(Normal, Path, Slot.NormalTexturePath, OutError))
-			{
-				return false;
-			}
+			if (!ReadMaterialBaseColor(Material, Slot.BaseColor, OutError)) return false;
+			if (!ReadMaterialTexturePath(Diffuse, Path, Slot.DiffuseTexturePath, OutError)) return false;
+			if (!ReadMaterialTexturePath(Normal, Path, Slot.NormalTexturePath, OutError, true)) return false;
 
 			const uint16 SlotIndex = static_cast<uint16>(ImportedData.MaterialSlots.Add(Slot));
 
@@ -1492,11 +1533,19 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 			const FbxProperty Diffuse = Material->FindProperty(FbxSurfaceMaterial::sDiffuse);
 			const FbxProperty Normal = Material->FindProperty(FbxSurfaceMaterial::sNormalMap);
 
-			if (!ValidateMaterialTextureUVSet(Diffuse, *Mesh, UVSetName, OutError)
-				|| !ValidateMaterialTextureUVSet(Normal, *Mesh, UVSetName, OutError))
+			// 실제로 사용할 노멀맵이 있을 때만 원본 텍스처의 UV 설정을 검사한다.
+			const uint16* MaterialSlotIndex = MaterialIndexMap.Find(Material);
+			if (!MaterialSlotIndex || !ImportedData.MaterialSlots.IsValidIndex(*MaterialSlotIndex))
 			{
+				OutError = "Failed to resolve material slot for UV validation.";
 				return false;
 			}
+
+			const FStaticMaterialSlot& Slot = ImportedData.MaterialSlots[*MaterialSlotIndex];
+			const bool bHasNormalTexture = !Slot.NormalTexturePath.empty();
+
+			if (!ValidateMaterialTextureUVSet(Diffuse, *Mesh, UVSetName, OutError)) return false;
+			if (bHasNormalTexture && !ValidateMaterialTextureUVSet(Normal, *Mesh, UVSetName, OutError)) return false;
 		}
 
 		const TArray<FSkinWeightInfo>* MeshSkinWeights = Context.ControlPointSkinWeights.Find(MeshNode);
@@ -1755,8 +1804,8 @@ void FFbxImporter::LoadSceneRecursive(FbxNode* Node, FImportContext& Context)
 		return;
 	}
 
-	// 이후 Transform과 재질 정보도 사용하므로 Mesh 대신 Node를 저장한다.
-	if (Node->GetMesh())
+	// 빈 메시 노드는 렌더링 대상이 아니다. Transform과 재질을 읽기 위해 Node를 보관한다.
+	if (FbxMesh* Mesh = Node->GetMesh(); Mesh && Mesh->GetPolygonCount() > 0)
 	{
 		Context.MeshNodes.Add(Node);
 	}
