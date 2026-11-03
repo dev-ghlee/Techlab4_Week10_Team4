@@ -23,6 +23,4 @@ private:
 	UStaticMesh* BoneSphereMesh = nullptr;
 	UStaticMesh* BoneOctahedronMesh = nullptr;
 	TUniquePtr<FConstantBuffer> ConstantBuffer;
-
-	TArray<float> JointRadii;
 };

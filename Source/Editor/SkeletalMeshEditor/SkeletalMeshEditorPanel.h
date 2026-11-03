@@ -29,6 +29,7 @@ public:
 	bool IsRenderMesh() const { return bRenderMesh; }
 	bool IsRenderBones() const { return bRenderBones; }
 
+	void SetSkeleton(const FReferenceSkeleton& Skeleton);
 	const FSkeletalPose& GetPreviewPose() const { return PreviewPose; }
 	int32 GetSelectedBoneIndex() const { return SelectedBoneIndex; }
 

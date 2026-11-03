@@ -55,30 +55,7 @@ void FBoneRenderer::OnRender(const FSkeletalPose& Pose, int32 SelectedBoneIndex,
 
 	RenderCommand::BindPipelineState(PipelineState);
 
-	JointRadii.SetNum(Pose.LocalPose.Num());
-	for (float& Radius : JointRadii)
-	{
-		Radius = FLT_MAX;
-	}
-
-	for (int32 Index = 0; Index < Pose.LocalPose.Num(); ++Index)
-	{
-		const int32 ParentIndex = Pose.Skeleton->RefBoneInfo[Index].ParentIndex;
-		if (ParentIndex < 0)
-		{
-			continue;
-		}
-		
-		const FVector Delta = Pose.ComponentSpacePose[Index].GetOrigin() - Pose.ComponentSpacePose[ParentIndex].GetOrigin();
-		const float Radius = Delta.Length() * JointRadiusRatio;
-		if (Radius < KINDA_SMALL_NUMBER)
-		{
-			continue;
-		}
-
-		JointRadii[Index] = std::min(JointRadii[Index], Radius);
-		JointRadii[ParentIndex] = std::min(JointRadii[ParentIndex], Radius);
-	}
+	TArray<float> JointRadii = GetJointRadii(Pose);
 
 	RenderCommand::BindConstantBuffer(0, ConstantBuffer.get(), EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 
@@ -87,7 +64,7 @@ void FBoneRenderer::OnRender(const FSkeletalPose& Pose, int32 SelectedBoneIndex,
 	for (int32 Index = 0; Index < Pose.LocalPose.Num(); ++Index)
 	{
 		const FVector Location = Pose.ComponentSpacePose[Index].GetOrigin();
-		const float Radius = JointRadii[Index] < FLT_MAX ? JointRadii[Index] : DefaultJointRadius;
+		const float Radius = JointRadii[Index];
 
 		const FMatrix World{
 			{ Radius, 0.0f, 0.0f, 0.0f },

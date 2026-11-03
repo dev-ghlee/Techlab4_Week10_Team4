@@ -64,7 +64,7 @@ namespace
 		{
 			ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthFixed, LabelWidth);
 			ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
-			ImGui::TableSetupColumn("Reset", ImGuiTableColumnFlags_WidthFixed, 30.0f);
+			ImGui::TableSetupColumn("Reset", ImGuiTableColumnFlags_WidthFixed, 35.0f);
 
 			ImGui::TableNextColumn();
 			ImGui::Text("%s", Label.c_str());
@@ -173,6 +173,13 @@ void FSkeletalMeshEditorPanel::OnRender()
 			if (ImGui::BeginChild("##SkeletonTree", ImVec2(0, 300), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY))
 			{
 				ImGui::SeparatorText("Skeleton Tree");
+				for (int32 Index = 0; Index < ReferenceSkeleton.RefBoneInfo.Num(); ++Index)
+				{
+					if (ReferenceSkeleton.RefBoneInfo[Index].ParentIndex < 0)
+					{
+						DrawBoneTreeNode(Index);
+					}
+				}
 				DrawBoneTreeNode(0);
 
 				if (ImGui::IsWindowHovered() &&
@@ -223,6 +230,29 @@ UWorld* FSkeletalMeshEditorPanel::ReleasePreviewWorld()
 	UWorld* World = PreviewWorld;
 	PreviewWorld = nullptr;
 	return World;
+}
+
+void FSkeletalMeshEditorPanel::SetSkeleton(const FReferenceSkeleton& Skeleton)
+{
+	ReferenceSkeleton = Skeleton;
+	PreviewPose.Skeleton = &ReferenceSkeleton;
+	PreviewPose.Reset();
+
+	Children.SetNum(ReferenceSkeleton.RefBoneInfo.Num());
+	for (int32 BoneIndex = 0; BoneIndex < ReferenceSkeleton.RefBoneInfo.Num(); ++BoneIndex)
+	{
+		const int32 ParentIndex = ReferenceSkeleton.RefBoneInfo[BoneIndex].ParentIndex;
+		if (ParentIndex >= 0)
+		{
+			Children[ParentIndex].Add(BoneIndex);
+		}
+	}
+
+	UndoStack.Reset();
+	RedoStack.Reset();
+	LastSnapshot = PreviewPose.LocalPose;
+
+	SelectBone(-1);
 }
 
 void FSkeletalMeshEditorPanel::TickCameraInput()
@@ -282,47 +312,33 @@ void FSkeletalMeshEditorPanel::TickShortcut()
 
 void FSkeletalMeshEditorPanel::BuildDummySkeleton()
 {
-	ReferenceSkeleton = {};
-	PreviewPose.LocalPose.Reset();
+	FReferenceSkeleton Skeleton;
 
-	ReferenceSkeleton.RefBoneInfo.Emplace("Root", -1);
-	ReferenceSkeleton.RefBonePoses.Emplace(FTransform::Identity);
+	Skeleton.RefBoneInfo.Emplace("Root", -1);
+	Skeleton.RefBonePoses.Emplace(FTransform::Identity);
 
-	ReferenceSkeleton.RefBoneInfo.Emplace("Pelvis", 0);
-	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.0f, 1.0f });
+	Skeleton.RefBoneInfo.Emplace("Pelvis", 0);
+	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.0f, 1.0f });
 
-	ReferenceSkeleton.RefBoneInfo.Emplace("Spine", 1);
-	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.0f, 0.5f });
+	Skeleton.RefBoneInfo.Emplace("Spine", 1);
+	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.0f, 0.5f });
 
-	ReferenceSkeleton.RefBoneInfo.Emplace("Head", 2);
-	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.0f, 0.5f });
+	Skeleton.RefBoneInfo.Emplace("Head", 2);
+	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.0f, 0.5f });
 
-	ReferenceSkeleton.RefBoneInfo.Emplace("LeftArm", 2);
-	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, -0.3f, 0.4f });
+	Skeleton.RefBoneInfo.Emplace("LeftArm", 2);
+	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, -0.3f, 0.4f });
 
-	ReferenceSkeleton.RefBoneInfo.Emplace("LeftHand", 4);
-	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, -0.5f, 0.0f });
+	Skeleton.RefBoneInfo.Emplace("LeftHand", 4);
+	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, -0.5f, 0.0f });
 
-	ReferenceSkeleton.RefBoneInfo.Emplace("RightArm", 2);
-	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.3f, 0.4f });
+	Skeleton.RefBoneInfo.Emplace("RightArm", 2);
+	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.3f, 0.4f });
 
-	ReferenceSkeleton.RefBoneInfo.Emplace("RightHand", 6);
-	ReferenceSkeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.5f, 0.0f });
+	Skeleton.RefBoneInfo.Emplace("RightHand", 6);
+	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.5f, 0.0f });
 
-	PreviewPose.Skeleton = &ReferenceSkeleton;
-	PreviewPose.Reset();
-
-	Children.SetNum(ReferenceSkeleton.RefBoneInfo.Num());
-	for (int32 BoneIndex = 0; BoneIndex < ReferenceSkeleton.RefBoneInfo.Num(); ++BoneIndex)
-	{
-		const int32 ParentIndex = ReferenceSkeleton.RefBoneInfo[BoneIndex].ParentIndex;
-		if (ParentIndex >= 0)
-		{
-			Children[ParentIndex].Add(BoneIndex);
-		}
-	}
-
-	LastSnapshot = PreviewPose.LocalPose;
+	SetSkeleton(Skeleton);
 }
 
 void FSkeletalMeshEditorPanel::DrawViewport()
@@ -403,42 +419,7 @@ void FSkeletalMeshEditorPanel::SelectBone(int32 BoneIndex)
 
 int32 FSkeletalMeshEditorPanel::PickBone(const FVector2& MousePosition)
 {
-	constexpr float JointRadiusRatio = 0.07f;
-	constexpr float DefaultJointRadius = 0.05f;
-
-	TArray<float> JointRadii;
-	JointRadii.SetNum(PreviewPose.LocalPose.Num());
-	for (float& Radius : JointRadii)
-	{
-		Radius = FLT_MAX;
-	}
-
-	for (int32 Index = 0; Index < PreviewPose.LocalPose.Num(); ++Index)
-	{
-		const int32 ParentIndex = PreviewPose.Skeleton->RefBoneInfo[Index].ParentIndex;
-		if (ParentIndex < 0)
-		{
-			continue;
-		}
-
-		const FVector Delta = PreviewPose.ComponentSpacePose[Index].GetOrigin() - PreviewPose.ComponentSpacePose[ParentIndex].GetOrigin();
-		const float Radius = Delta.Length() * JointRadiusRatio;
-		if (Radius < KINDA_SMALL_NUMBER)
-		{
-			continue;
-		}
-
-		JointRadii[Index] = std::min(JointRadii[Index], Radius);
-		JointRadii[ParentIndex] = std::min(JointRadii[ParentIndex], Radius);
-	}
-
-	for (float& Radius : JointRadii)
-	{
-		if (Radius == FLT_MAX)
-		{
-			Radius = DefaultJointRadius;
-		}
-	}
+	TArray<float> JointRadii = GetJointRadii(PreviewPose);
 
 	const auto& Pose = PreviewPose.ComponentSpacePose;
 	const FMatrix ViewProjection = ViewportClient.GetViewProjectionMatrix();

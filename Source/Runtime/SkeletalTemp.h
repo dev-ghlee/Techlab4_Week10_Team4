@@ -61,3 +61,45 @@ struct FSkeletalPose
 		return Rotation;
 	}
 };
+
+inline TArray<float> GetJointRadii(const FSkeletalPose& Pose)
+{
+	constexpr float JointRadiusRatio = 0.07f;
+	constexpr float DefaultJointRadius = 0.05f;
+
+	TArray<float> Radii;
+	Radii.SetNum(Pose.LocalPose.Num());
+	for (float& Radius : Radii)
+	{
+		Radius = FLT_MAX;
+	}
+
+	for (int32 Index = 0; Index < Pose.LocalPose.Num(); ++Index)
+	{
+		const int32 ParentIndex = Pose.Skeleton->RefBoneInfo[Index].ParentIndex;
+		if (ParentIndex < 0)
+		{
+			continue;
+		}
+
+		const FVector Delta = Pose.ComponentSpacePose[Index].GetOrigin() - Pose.ComponentSpacePose[ParentIndex].GetOrigin();
+		const float Radius = Delta.Length() * JointRadiusRatio;
+		if (Radius < KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		Radii[Index] = std::min(Radii[Index], Radius);
+		Radii[ParentIndex] = std::min(Radii[ParentIndex], Radius);
+	}
+
+	for (float& Radius : Radii)
+	{
+		if (Radius == FLT_MAX)
+		{
+			Radius = DefaultJointRadius;
+		}
+	}
+
+	return Radii;
+}
