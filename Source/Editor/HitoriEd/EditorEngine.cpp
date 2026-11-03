@@ -183,6 +183,7 @@ bool UEditorEngine::Init()
 
 	ContentDrawerPanel->SetCreateWidgetCallback([this](const FString& Path) { UIEditorPanel->NewAsset(Path); });
 	ContentDrawerPanel->SetOpenWidgetCallback([this](const FString& Path) { UIEditorPanel->OpenAsset(Path); });
+	ContentDrawerPanel->SetOpenSkeletalCallback([this](const FString& Path) { SkeletalMeshEditorPanel->OpenAsset(Path); });
 
 	Outline = MakeUnique<FOutline>();
 
@@ -819,14 +820,6 @@ void UEditorEngine::RenderSkeletalMeshPreview()
 	RenderScene(Targets, SceneView, SceneRenderer, PreviewWorld, Options,
 		[this, &SceneView, &Targets](FSceneOverlayCallbacks& Overlays)
 		{
-			Overlays.EditorLines = [this, &SceneView]
-				{
-					if (SkeletalMeshEditorPanel->IsRenderMesh())
-					{
-						// TODO: 스킨 메시 그리는 코드...
-					}
-				};
-
 			if (SkeletalMeshEditorPanel->IsRenderGrid())
 			{
 				const FViewportSettings ViewportSettings

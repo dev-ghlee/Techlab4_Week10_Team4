@@ -1,20 +1,6 @@
 #pragma once
 
-#include "Math/Transform.h"
-
-// 부모 인덱스 < 자식 인덱스, 즉 루트 == 0. 루트의 부모 == -1
-
-struct FMeshBoneInfo
-{
-	FName Name;
-	int32 ParentIndex = -1;
-};
-
-struct FReferenceSkeleton
-{
-	TArray<FMeshBoneInfo> RefBoneInfo;
-	TArray<FTransform> RefBonePoses;
-};
+#include "Render/ReferenceSkeleton.h"
 
 struct FSkeletalPose
 {
@@ -26,7 +12,7 @@ struct FSkeletalPose
 	{
 		if (Skeleton)
 		{
-			LocalPose = Skeleton->RefBonePoses;
+			LocalPose = Skeleton->RawRefBonePose;
 		}
 	}
 
@@ -45,7 +31,7 @@ struct FSkeletalPose
 
 		for (int32 BoneIndex = 0; BoneIndex < LocalPose.Num(); ++BoneIndex)
 		{
-			const int32 ParentIndex = Skeleton->RefBoneInfo[BoneIndex].ParentIndex;
+			const int32 ParentIndex = Skeleton->RawRefBoneInfo[BoneIndex].ParentIndex;
 			ComponentSpacePose[BoneIndex] = LocalPose[BoneIndex].GetLocalMatrix() *
 				(ParentIndex >= 0 ? ComponentSpacePose[ParentIndex] : FMatrix::Identity);
 		}
@@ -54,7 +40,7 @@ struct FSkeletalPose
 	FQuat GetComponentRotation(int32 BoneIndex) const
 	{
 		FQuat Rotation = LocalPose[BoneIndex].GetOrientation();
-		for (int32 Parent = Skeleton->RefBoneInfo[BoneIndex].ParentIndex; Parent >= 0; Parent = Skeleton->RefBoneInfo[Parent].ParentIndex)
+		for (int32 Parent = Skeleton->RawRefBoneInfo[BoneIndex].ParentIndex; Parent >= 0; Parent = Skeleton->RawRefBoneInfo[Parent].ParentIndex)
 		{
 			Rotation = LocalPose[Parent].GetOrientation() * Rotation;
 		}
@@ -76,7 +62,7 @@ inline TArray<float> GetJointRadii(const FSkeletalPose& Pose)
 
 	for (int32 Index = 0; Index < Pose.LocalPose.Num(); ++Index)
 	{
-		const int32 ParentIndex = Pose.Skeleton->RefBoneInfo[Index].ParentIndex;
+		const int32 ParentIndex = Pose.Skeleton->RawRefBoneInfo[Index].ParentIndex;
 		if (ParentIndex < 0)
 		{
 			continue;
@@ -103,3 +89,4 @@ inline TArray<float> GetJointRadii(const FSkeletalPose& Pose)
 
 	return Radii;
 }
+

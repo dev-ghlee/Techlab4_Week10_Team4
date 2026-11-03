@@ -5,7 +5,10 @@
 #include "Editor/Settings/SettingsPanel.h"
 #include "Engine/World.h"
 #include "Asset/AssetManager.h"
-#include "GameFramework/Actor/StaticMeshActor.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Render/ReferenceSkeleton.h"
 
 namespace
 {
@@ -137,18 +140,31 @@ namespace
 
 bool FSkeletalMeshEditorPanel::Init()
 {
+	SetOpen(false);
+
 	PreviewWorld = UWorld::CreateWorld(EWorldType::Editor, false, "SkeletalMeshPreview");
 	ViewportClient.SetWorld(PreviewWorld);
 	ViewportClient.SetViewLocation(FVector{ -4.0f, 0.0f, 2.0f });
 	ViewportClient.SetViewRotation(FVector{ 20.0f, 0.0f, 0.0f });
 
-	BuildDummySkeleton();
-
-	// TEMP: 본 오버레이 테스트용 메시. 스킨 메시 연동 후 제거
-	const FTransform TestMeshTransform{ FRotator::Identity, FVector{ 0.0f, 0.0f, 1.5f }, FVector{ 0.5f, 1.2f, 1.2f } };
-	if (AStaticMeshActor* TestMeshActor = PreviewWorld->SpawnActor<AStaticMeshActor>("TestMesh", &TestMeshTransform))
+	if (AActor* PreviewActor = PreviewWorld->SpawnActor<AActor>("SkeletalPreview"))
 	{
-		TestMeshActor->GetStaticMeshComponent()->SetStaticMesh(UAssetManager::GetAssetByPath<UStaticMesh>("Cube"));
+		PreviewMeshComponent = Cast<USkeletalMeshComponent>(PreviewActor->AddComponent(USkeletalMeshComponent::StaticClass(), "PreviewMesh"));
+	}
+
+	// 라이트 액터 대신 컴포넌트만 붙여서 프리뷰에 아이콘/화살표가 보이지 않게 한다
+	if (AActor* LightActor = PreviewWorld->SpawnActor<AActor>("PreviewLights"))
+	{
+		if (auto* Sky = Cast<USkyLightComponent>(LightActor->AddComponent(USkyLightComponent::StaticClass(), "PreviewAmbient")))
+		{
+			Sky->SetIntensity(0.3f);
+		}
+
+		if (auto* Sun = Cast<UDirectionalLightComponent>(LightActor->AddComponent(UDirectionalLightComponent::StaticClass(), "PreviewDirectional")))
+		{
+			Sun->SetRelativeRotation(FRotator(45.0f, 30.0f, 0.0f));
+			Sun->SetIntensity(1.0f);
+		}
 	}
 
 	return true;
@@ -157,6 +173,7 @@ bool FSkeletalMeshEditorPanel::Init()
 void FSkeletalMeshEditorPanel::Tick(float DeltaTime)
 {
 	PreviewPose.UpdateComponentSpace();
+	SyncPoseToComponent();
 
 	if (PreviewWorld)
 	{
@@ -187,14 +204,13 @@ void FSkeletalMeshEditorPanel::OnRender()
 			if (ImGui::BeginChild("##SkeletonTree", ImVec2(0, 300), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY))
 			{
 				ImGui::SeparatorText("Skeleton Tree");
-				for (int32 Index = 0; Index < ReferenceSkeleton.RefBoneInfo.Num(); ++Index)
+				for (int32 Index = 0; Index < ReferenceSkeleton.RawRefBoneInfo.Num(); ++Index)
 				{
-					if (ReferenceSkeleton.RefBoneInfo[Index].ParentIndex < 0)
+					if (ReferenceSkeleton.RawRefBoneInfo[Index].ParentIndex < 0)
 					{
 						DrawBoneTreeNode(Index);
 					}
 				}
-				DrawBoneTreeNode(0);
 
 				if (ImGui::IsWindowHovered() &&
 					!ImGui::IsAnyItemHovered() &&
@@ -209,17 +225,17 @@ void FSkeletalMeshEditorPanel::OnRender()
 			{
 				ImGui::SeparatorText("Details");
 				
-				if (SelectedBoneIndex >= 0 && SelectedBoneIndex < ReferenceSkeleton.RefBoneInfo.Num())
+				if (SelectedBoneIndex >= 0 && SelectedBoneIndex < ReferenceSkeleton.RawRefBoneInfo.Num())
 				{
-					ImGui::Text("Name: %s", ReferenceSkeleton.RefBoneInfo[SelectedBoneIndex].Name.ToString().c_str());
+					ImGui::Text("Name: %s", ReferenceSkeleton.RawRefBoneInfo[SelectedBoneIndex].Name.ToString().c_str());
 
 					FVector& Location = PreviewPose.LocalPose[SelectedBoneIndex].Location;
 					FRotator& Rotation = PreviewPose.LocalPose[SelectedBoneIndex].Rotation;
 					FVector& Scale = PreviewPose.LocalPose[SelectedBoneIndex].Scale;
 
-					DrawVector3Controller("Location", &Location[0], &ReferenceSkeleton.RefBonePoses[SelectedBoneIndex].Location[0], 90.0f);
-					DrawRotatorController("Rotation", Rotation, ReferenceSkeleton.RefBonePoses[SelectedBoneIndex].Rotation, 90.0f);
-					DrawVector3Controller("Scale", &Scale[0], &ReferenceSkeleton.RefBonePoses[SelectedBoneIndex].Scale[0], 90.0f);
+					DrawVector3Controller("Location", &Location[0], &ReferenceSkeleton.RawRefBonePose[SelectedBoneIndex].Location[0], 90.0f);
+					DrawRotatorController("Rotation", Rotation, ReferenceSkeleton.RawRefBonePose[SelectedBoneIndex].Rotation, 90.0f);
+					DrawVector3Controller("Scale", &Scale[0], &ReferenceSkeleton.RawRefBonePose[SelectedBoneIndex].Scale[0], 90.0f);
 				}
 			}
 			ImGui::EndChild();
@@ -252,10 +268,10 @@ void FSkeletalMeshEditorPanel::SetSkeleton(const FReferenceSkeleton& Skeleton)
 	PreviewPose.Skeleton = &ReferenceSkeleton;
 	PreviewPose.Reset();
 
-	Children.SetNum(ReferenceSkeleton.RefBoneInfo.Num());
-	for (int32 BoneIndex = 0; BoneIndex < ReferenceSkeleton.RefBoneInfo.Num(); ++BoneIndex)
+	Children.SetNum(ReferenceSkeleton.RawRefBoneInfo.Num());
+	for (int32 BoneIndex = 0; BoneIndex < ReferenceSkeleton.RawRefBoneInfo.Num(); ++BoneIndex)
 	{
-		const int32 ParentIndex = ReferenceSkeleton.RefBoneInfo[BoneIndex].ParentIndex;
+		const int32 ParentIndex = ReferenceSkeleton.RawRefBoneInfo[BoneIndex].ParentIndex;
 		if (ParentIndex >= 0)
 		{
 			Children[ParentIndex].Add(BoneIndex);
@@ -267,6 +283,33 @@ void FSkeletalMeshEditorPanel::SetSkeleton(const FReferenceSkeleton& Skeleton)
 	LastSnapshot = PreviewPose.LocalPose;
 
 	SelectBone(-1);
+}
+
+bool FSkeletalMeshEditorPanel::LoadMesh(const FString& Path)
+{
+	FString Error;
+	USkeletalMesh* Mesh = UAssetManager::Get().LoadFbxSkeletalMesh(Path, Path, Error);
+	if (!Mesh || !PreviewMeshComponent)
+	{
+		HTR_LOG(Error, "{}", Error);
+		return false;
+	}
+
+	PreviewMeshComponent->SetSkeletalMesh(Mesh);
+	SetSkeleton(Mesh->GetRefSkeleton());
+
+	return true;
+}
+
+bool FSkeletalMeshEditorPanel::OpenAsset(const FString& Path)
+{
+	if (!LoadMesh(Path))
+	{
+		HTR_LOG(Error, "Failed to open skeletal mesh asset: {}", Path);
+		return false;
+	}
+	SetOpen(true);
+	return true;
 }
 
 void FSkeletalMeshEditorPanel::TickCameraInput()
@@ -324,37 +367,6 @@ void FSkeletalMeshEditorPanel::TickShortcut()
 	}
 }
 
-void FSkeletalMeshEditorPanel::BuildDummySkeleton()
-{
-	FReferenceSkeleton Skeleton;
-
-	Skeleton.RefBoneInfo.Emplace("Root", -1);
-	Skeleton.RefBonePoses.Emplace(FTransform::Identity);
-
-	Skeleton.RefBoneInfo.Emplace("Pelvis", 0);
-	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.0f, 1.0f });
-
-	Skeleton.RefBoneInfo.Emplace("Spine", 1);
-	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.0f, 0.5f });
-
-	Skeleton.RefBoneInfo.Emplace("Head", 2);
-	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.0f, 0.5f });
-
-	Skeleton.RefBoneInfo.Emplace("LeftArm", 2);
-	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, -0.3f, 0.4f });
-
-	Skeleton.RefBoneInfo.Emplace("LeftHand", 4);
-	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, -0.5f, 0.0f });
-
-	Skeleton.RefBoneInfo.Emplace("RightArm", 2);
-	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.3f, 0.4f });
-
-	Skeleton.RefBoneInfo.Emplace("RightHand", 6);
-	Skeleton.RefBonePoses.Emplace(FRotator::Identity, FVector{ 0.0f, 0.5f, 0.0f });
-
-	SetSkeleton(Skeleton);
-}
-
 void FSkeletalMeshEditorPanel::DrawViewport()
 {
 	DrawGizmoToolbar();
@@ -380,10 +392,10 @@ void FSkeletalMeshEditorPanel::DrawViewport()
 
 void FSkeletalMeshEditorPanel::DrawBoneTreeNode(int32 BoneIndex)
 {
-	if (BoneIndex < 0 || BoneIndex >= ReferenceSkeleton.RefBoneInfo.Num())
+	if (BoneIndex < 0 || BoneIndex >= ReferenceSkeleton.RawRefBoneInfo.Num())
 		return;
 
-	const auto& RefBoneInfo = ReferenceSkeleton.RefBoneInfo[BoneIndex];
+	const auto& RefBoneInfo = ReferenceSkeleton.RawRefBoneInfo[BoneIndex];
 
 	const bool bIsLeaf = Children[BoneIndex].Num() == 0;
 
@@ -484,7 +496,7 @@ int32 FSkeletalMeshEditorPanel::PickBone(const FVector2& MousePosition)
 	int32 PickedBone = -1;
 	for (int32 Index = 0; Index < Pose.Num(); ++Index)
 	{
-		const int32 ParentIndex = ReferenceSkeleton.RefBoneInfo[Index].ParentIndex;
+		const int32 ParentIndex = ReferenceSkeleton.RawRefBoneInfo[Index].ParentIndex;
 		if (ParentIndex < 0 || ScreenJoints[Index].X == -FLT_MAX || ScreenJoints[ParentIndex].X == -FLT_MAX)
 		{
 			continue;
@@ -585,7 +597,10 @@ void FSkeletalMeshEditorPanel::DrawGizmoToolbar()
 
 	ImGui::Checkbox("Grid", &bRenderGrid);
 	ImGui::SameLine();
-	ImGui::Checkbox("Mesh", &bRenderMesh);
+	if (ImGui::Checkbox("Mesh", &bRenderMesh))
+	{
+		PreviewMeshComponent->SetVisibility(bRenderMesh);
+	}
 	ImGui::SameLine();
 	ImGui::Checkbox("Bones", &bRenderBones);
 }
@@ -638,5 +653,21 @@ void FSkeletalMeshEditorPanel::Redo()
 		UndoStack.Push(Change);
 
 		LastSnapshot[Change.BoneIndex] = Change.After;
+	}
+}
+
+void FSkeletalMeshEditorPanel::SyncPoseToComponent()
+{
+	if (!PreviewMeshComponent || PreviewMeshComponent->GetNumBones() != PreviewPose.LocalPose.Num())
+	{
+		return;
+	}
+
+	for (int32 Index = 0; Index < PreviewPose.LocalPose.Num(); ++Index)
+	{
+		if (PreviewPose.LocalPose[Index] != PreviewMeshComponent->GetBoneLocalTransform(Index))
+		{
+			PreviewMeshComponent->SetBoneLocalTransform(Index, PreviewPose.LocalPose[Index]);
+		}
 	}
 }

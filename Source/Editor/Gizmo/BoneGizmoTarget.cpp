@@ -1,7 +1,7 @@
 #include "EnginePCH.h"
 #include "BoneGizmoTarget.h"
 
-#include "SkeletalTemp.h"
+#include "Editor/SkeletalMeshEditor/SkeletalPose.h"
 
 FVector FBoneGizmoTarget::GetPivotLocation() const
 {
@@ -46,5 +46,5 @@ void FBoneGizmoTarget::SetScale(const FVector& InScale)
 
 int32 FBoneGizmoTarget::GetParentIndex() const
 {
-	return Pose->Skeleton->RefBoneInfo[BoneIndex].ParentIndex;
+	return Pose->Skeleton->RawRefBoneInfo[BoneIndex].ParentIndex;
 }

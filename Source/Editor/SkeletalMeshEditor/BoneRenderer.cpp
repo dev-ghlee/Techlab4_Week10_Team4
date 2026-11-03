@@ -1,7 +1,7 @@
 #include "EnginePCH.h"
 #include "BoneRenderer.h"
 
-#include "SkeletalTemp.h"
+#include "SkeletalPose.h"
 #include "Asset/AssetManager.h"
 
 namespace
@@ -102,7 +102,7 @@ void FBoneRenderer::DrawBones(const FSkeletalPose& Pose, const TArray<float>& Jo
 	RenderCommand::BindMesh(BoneOctahedronMesh);
 	for (int32 Index = 0; Index < Pose.LocalPose.Num(); ++Index)
 	{
-		const int32 ParentIndex = Pose.Skeleton->RefBoneInfo[Index].ParentIndex;
+		const int32 ParentIndex = Pose.Skeleton->RawRefBoneInfo[Index].ParentIndex;
 		if (ParentIndex < 0)
 		{
 			continue;

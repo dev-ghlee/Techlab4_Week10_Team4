@@ -1,11 +1,12 @@
 #pragma once
 
-#include "SkeletalTemp.h"
+#include "SkeletalPose.h"
 #include "Editor/EditorUI/EditorPanel.h"
 #include "Editor/Gizmo/BoneGizmoTarget.h"
 #include "Editor/Gizmo/Gizmo.h"
 #include "Editor/Viewports/EditorViewportClient.h"
 
+class USkeletalMeshComponent;
 struct FEditorSettings;
 class UWorld;
 
@@ -27,17 +28,17 @@ public:
 
 	bool IsRenderGrid() const { return bRenderGrid; }
 	bool IsRenderMesh() const { return bRenderMesh; }
-	bool IsRenderBones() const { return bRenderBones; }
+	bool IsRenderBones() const { return bRenderBones || SelectedBoneIndex != -1; }
 
 	void SetSkeleton(const FReferenceSkeleton& Skeleton);
+	bool LoadMesh(const FString& Path);
+	bool OpenAsset(const FString& Path);
 	const FSkeletalPose& GetPreviewPose() const { return PreviewPose; }
 	int32 GetSelectedBoneIndex() const { return SelectedBoneIndex; }
 
 private:
 	void TickCameraInput();
 	void TickShortcut();
-
-	void BuildDummySkeleton();
 
 	void DrawViewport();
 	void DrawBoneTreeNode(int32 BoneIndex);
@@ -50,6 +51,8 @@ private:
 	void CommitUndo();
 	void Undo();
 	void Redo();
+
+	void SyncPoseToComponent();
 
 	UWorld* PreviewWorld = nullptr;
 	FEditorViewportClient ViewportClient;
@@ -65,6 +68,7 @@ private:
 	bool bRenderBones = true;
 
 	FReferenceSkeleton ReferenceSkeleton;
+	USkeletalMeshComponent* PreviewMeshComponent = nullptr;
 	FSkeletalPose PreviewPose;
 
 	TArray<TArray<int32>> Children;
