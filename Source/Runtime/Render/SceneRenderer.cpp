@@ -210,7 +210,7 @@ void FSceneRenderer::CollectDecalReceivers(const FDecalSceneProxy* Decal, TArray
 	);
 }
 
-bool FSceneRenderer::AddDecalPass(FRenderGraphBuilder& Graph, FRenderer* Renderer, FRenderGraphTextureRef HDRTarget, FRenderGraphTextureRef DepthTarget, const FSceneRenderOptions& Options)
+bool FSceneRenderer::AddDecalPass(FRenderGraphBuilder& Graph, FRenderer* Renderer, FRenderGraphTextureRef HDRTarget, FRenderGraphTextureRef DepthTarget, const FSceneRenderOptions& Options, FRenderGraphTextureRef ForwardShadowMask)
 {
 	if(!World || !Renderer)
 	{
@@ -226,9 +226,16 @@ bool FSceneRenderer::AddDecalPass(FRenderGraphBuilder& Graph, FRenderer* Rendere
 
 	FRenderGraphRasterPassDesc PassDesc = MakeViewportPass("DecalPass", HDRTarget, DepthTarget);
 
-	return Graph.AddRasterPass(std::move(PassDesc), [ this, Renderer ]()
+	if(ForwardShadowMask)
+	{
+		PassDesc.ReadTextures.push_back(ForwardShadowMask);
+	}
+
+	return Graph.AddRasterPass(std::move(PassDesc), [ this, Renderer, &Graph, ForwardShadowMask, Options ]()
 		{
+			BindForwardLighting(Renderer, Options, ForwardShadowMask ? Graph.Resolve(ForwardShadowMask) : nullptr);
 			RenderDecals(Renderer);
+			UnbindForwardLighting(Renderer);
 		});
 }
 
@@ -339,14 +346,25 @@ void FSceneRenderer::RenderDecals(FRenderer* Renderer)
 		RenderCommand::UpdateBufferData(DecalCB, &DecalData, sizeof(DecalData));
 		RenderCommand::BindConstantBuffer(2, DecalCB, EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 
+		// Decal texture binding
 		if(Decal->DecalMaterial && !Decal->DecalMaterial->Textures.IsEmpty())
 		{
-			RenderCommand::BindShaderResource(0, Decal->DecalMaterial->Textures[0], EShaderBindFlagBits::Pixel);
+			RenderCommand::BindShaderResource(0, Decal->DecalMaterial->Textures[0], EShaderBindFlagBits::Pixel);			
 		}
 		else
 		{
 			RenderCommand::BindShaderResource(0, static_cast<UTexture2D*>(nullptr), EShaderBindFlagBits::Pixel); // Null texture if no decal material or texture
 		}
+		// Decal normal map binding
+		if(Decal->DecalMaterial && Decal->DecalMaterial->Textures.Num() > 1)
+		{
+			RenderCommand::BindShaderResource(1, Decal->DecalMaterial->Textures[1], EShaderBindFlagBits::Pixel);
+		}
+		else
+		{
+			RenderCommand::BindShaderResource(1, static_cast<UTexture2D*>(nullptr), EShaderBindFlagBits::Pixel); // Null texture if no normal map
+		}
+		
 
 		// Render decals for each receiver
 		for(FPrimitiveSceneProxy* Receiver : Receivers)
@@ -372,6 +390,7 @@ void FSceneRenderer::RenderDecals(FRenderer* Renderer)
 	}
 
 	RenderCommand::BindShaderResource(0, static_cast<UTexture2D*>(nullptr), EShaderBindFlagBits::Pixel);
+	RenderCommand::BindShaderResource(1, static_cast<UTexture2D*>(nullptr), EShaderBindFlagBits::Pixel);
 }
 
 void FSceneRenderer::InitViews(FRenderer* Renderer, const FSceneRenderOptions& Options)
@@ -592,6 +611,8 @@ bool FSceneRenderer::AddCorePasses(FRenderGraphBuilder& Graph, FRenderer* Render
 			})) return false;
 	}
 
+	FRenderGraphTextureRef ForwardShadowMask{};
+
 	if (Options.RenderingPath == ERenderingPath::Deferred) // Deferred rendering
 	{
 		const FRenderGraphTextureDesc GBufferDesc{ Width, Height, ETextureFormat::R8G8B8A8_UNorm };
@@ -773,7 +794,6 @@ bool FSceneRenderer::AddCorePasses(FRenderGraphBuilder& Graph, FRenderer* Render
 		}
 
 		// 그림자 광원마다 배정된 채널(R~A)에 Projection한다. 한 픽셀에서 겹치는 그림자 광원은 서로 다른 채널을 받는다.
-		FRenderGraphTextureRef ForwardShadowMask{};
 		if (bForwardShadows)
 		{
 			ForwardShadowMask = Graph.CreateTexture({ Width, Height, ETextureFormat::R8G8B8A8_UNorm }, "ScreenShadowMask");
@@ -835,7 +855,7 @@ bool FSceneRenderer::AddCorePasses(FRenderGraphBuilder& Graph, FRenderer* Render
 		})) return false;
 	}
 
-	if(!AddDecalPass(Graph, Renderer, LightingHDR, Depth, Options))
+	if(!AddDecalPass(Graph, Renderer, LightingHDR, Depth, Options, ForwardShadowMask))
 	{
 		return false;
 	}

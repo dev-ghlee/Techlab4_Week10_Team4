@@ -148,7 +148,7 @@ private:
 
 private:
 	void CollectDecalReceivers(const FDecalSceneProxy* Decal, TArray<FPrimitiveSceneProxy*>& OutReceivers);
-	bool AddDecalPass(FRenderGraphBuilder& Graph, FRenderer* Renderer, FRenderGraphTextureRef HDRTarget, FRenderGraphTextureRef DepthTarget, const FSceneRenderOptions& Options);
+	bool AddDecalPass(FRenderGraphBuilder& Graph, FRenderer* Renderer, FRenderGraphTextureRef HDRTarget, FRenderGraphTextureRef DepthTarget, const FSceneRenderOptions& Options, FRenderGraphTextureRef ForwardShadowMask);
 	void RenderDecals(FRenderer* Renderer);
 
 };
