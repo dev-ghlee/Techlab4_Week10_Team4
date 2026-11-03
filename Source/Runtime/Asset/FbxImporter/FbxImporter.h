@@ -5,6 +5,7 @@
 struct FSkeletalMeshData;
 struct FTransform;
 struct FVector4;
+struct FMatrix;
 
 // Node 목록과 본 인덱스 대응표 등의 임시 정보. 정의는 cpp에 둔다.
 struct FImportContext;
@@ -32,6 +33,9 @@ private:
 
 	// SDK 행렬을 엔진 Transform으로 변환하고 원본 변환의 보존 여부를 확인한다.
 	static bool ConvertFbxMatrixToTransform(const fbxsdk::FbxMatrix& InMatrix, FTransform& OutTransform, FString& OutError);
+
+	// 비균일 스케일을 포함한 메시 변환에 사용할 노멀 행렬을 만든다.
+	static bool BuildNormalMatrix(const fbxsdk::FbxMatrix& MeshToSkeletal, FMatrix& OutNormalMatrix, FString& OutError);
 
 	// 표준 Lambert와 Phong 재질의 Diffuse를 엔진 BaseColor로 읽는다.
 	static bool ReadMaterialBaseColor(fbxsdk::FbxSurfaceMaterial* Material, FVector4& OutBaseColor, FString& OutError);

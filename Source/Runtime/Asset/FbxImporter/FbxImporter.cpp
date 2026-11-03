@@ -72,6 +72,10 @@ struct FImportContext
 	// Mesh Node의 로컬 재질 인덱스에서 전체 MaterialSlots 인덱스로의 대응표.
 	// 재질이 없는 Mesh는 기본 슬롯을 가리키는 항목 하나를 둔다.
 	TMap<FbxNode*, TArray<uint16>> MeshMaterialIndices;
+
+	// PolygonIndex * 3 + CornerIndex에서 전체 ReferenceVertices 인덱스로의 대응표.
+	// 이후 삼각형 인덱스와 Section을 구성할 때 사용한다.
+	TMap<FbxNode*, TArray<uint32>> MeshPolygonVertexIndices;
 };
 
 bool FFbxImporter::IsWithinFloatRange(double Value)
@@ -148,6 +152,47 @@ bool FFbxImporter::ConvertFbxMatrixToTransform(const FbxMatrix& InMatrix, FTrans
 	}
 
 	OutTransform = Converted;
+	return true;
+}
+
+bool FFbxImporter::BuildNormalMatrix(const FbxMatrix& MeshToSkeletal, FMatrix& OutNormalMatrix, FString& OutError)
+{
+	const double Determinant = MeshToSkeletal.Determinant();
+	if (!std::isfinite(Determinant) || Determinant == 0.0)
+	{
+		OutError = "Mesh transform is not invertible.";
+		return false;
+	}
+
+	const FbxMatrix SkeletalToMesh = MeshToSkeletal.Inverse();
+	const FbxVector4 Origin = SkeletalToMesh.MultNormalize(FbxVector4(0, 0, 0, 1));
+
+	FMatrix NormalMatrix = FMatrix::Identity;
+
+	for (int32 Axis = 0; Axis < 3; ++Axis)
+	{
+		FbxVector4 Point(0, 0, 0, 1);
+		Point[Axis] = 1.0;
+
+		// 역행렬로 변환한 축 끝점에서 이동을 제거한다.
+		const FbxVector4 InverseAxis = SkeletalToMesh.MultNormalize(Point) - Origin;
+
+		for (int32 Component = 0; Component < 3; ++Component)
+		{
+			const double Value = InverseAxis[Component];
+
+			if (!IsWithinFloatRange(Value))
+			{
+				OutError = "Mesh normal matrix exceeds the engine numeric range.";
+				return false;
+			}
+
+			// 역행렬의 행과 열을 바꿔 역전치 행렬을 구성한다.
+			NormalMatrix[Component][Axis] = static_cast<float>(Value);
+		}
+	}
+
+	OutNormalMatrix = NormalMatrix;
 	return true;
 }
 
@@ -991,7 +1036,188 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		}
 	}
 
-	// 이후 여기에 메시 등의 추출을 추가한다.
+	for (FbxNode* MeshNode : Context.MeshNodes)
+	{
+		FbxMesh* Mesh = MeshNode->GetMesh();
+		const FbxMatrix* MeshToSkeletal = Context.MeshToSkeletalMatrices.Find(MeshNode);
+		auto& PolygonVertexIndices = Context.MeshPolygonVertexIndices.FindOrAdd(MeshNode);
+
+		if (!Mesh || !MeshToSkeletal)
+		{
+			OutError = "Failed to resolve mesh import data.";
+			return false;
+		}
+
+		const int32 PolygonCount = Mesh->GetPolygonCount();
+		if (PolygonCount == 0)
+		{
+			continue;
+		}
+
+		const int32 ControlPointCount = Mesh->GetControlPointsCount();
+		const FbxVector4* ControlPoints = Mesh->GetControlPoints();
+
+		if (ControlPointCount <= 0 || !ControlPoints)
+		{
+			OutError = "FBX mesh has no valid control points.";
+			return false;
+		}
+
+		// 앞선 삼각형화에 의해 Polygon마다 꼭짓점이 세 개다.
+		// TArray::Num()이 int32이므로 최종 정점 개수도 범위를 확인한다.
+		const int64 AddedVertexCount = static_cast<int64>(PolygonCount) * 3;
+		const int64 TotalVertexCount = ImportedData.ReferenceVertices.Num() + AddedVertexCount;
+
+		if (TotalVertexCount > std::numeric_limits<int32>::max())
+		{
+			OutError = "Skeletal mesh contains too many vertices.";
+			return false;
+		}
+
+		FMatrix NormalMatrix;
+		if (!BuildNormalMatrix(*MeshToSkeletal, NormalMatrix, OutError))
+		{
+			return false;
+		}
+
+		// 원본 노멀이 없으면 SDK에서 Polygon Vertex 노멀을 생성한다.
+		if (Mesh->GetElementNormalCount() == 0 && !Mesh->GenerateNormals(false, false, false))
+		{
+			OutError = "Failed to generate mesh normals.";
+			return false;
+		}
+
+		FbxStringList UVSetNames;
+		Mesh->GetUVSetNames(UVSetNames);
+		const char* UVSetName = UVSetNames.GetCount() > 0 ? UVSetNames.GetStringAt(0) : nullptr;
+
+		// UV가 없는 메시도 단색 재질이면 허용한다.
+		if (!UVSetName)
+		{
+			for (uint16 MaterialIndex : Context.MeshMaterialIndices[MeshNode])
+			{
+				const FStaticMaterialSlot& Slot = ImportedData.MaterialSlots[MaterialIndex];
+
+				if (!Slot.DiffuseTexturePath.empty() || !Slot.NormalTexturePath.empty())
+				{
+					OutError = "A textured mesh requires a UV set.";
+					return false;
+				}
+			}
+		}
+
+		const TArray<FSkinWeightInfo>* MeshSkinWeights = Context.ControlPointSkinWeights.Find(MeshNode);
+
+		if (MeshSkinWeights && MeshSkinWeights->Num() != ControlPointCount)
+		{
+			OutError = "Control point skin weight count does not match the mesh.";
+			return false;
+		}
+
+		PolygonVertexIndices.Reserve(static_cast<uint32>(AddedVertexCount));
+
+		for (int32 PolygonIndex = 0; PolygonIndex < PolygonCount; ++PolygonIndex)
+		{
+			for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+			{
+				const int32 ControlPointIndex = Mesh->GetPolygonVertex(PolygonIndex, CornerIndex);
+
+				if (ControlPointIndex < 0 || ControlPointIndex >= ControlPointCount)
+				{
+					OutError = "Polygon contains an invalid control point index.";
+					return false;
+				}
+
+				// 위치는 Control Point에서 읽고 공통 SkeletalMesh 공간으로 변환한다.
+				const FbxVector4& ControlPoint = ControlPoints[ControlPointIndex];
+				const FbxVector4 Position = MeshToSkeletal->MultNormalize(
+					FbxVector4(ControlPoint[0], ControlPoint[1], ControlPoint[2], 1));
+
+				// 노멀은 현재 Polygon Vertex 기준으로 읽는다.
+				FbxVector4 SourceNormal;
+				if (!Mesh->GetPolygonVertexNormal(PolygonIndex, CornerIndex, SourceNormal))
+				{
+					OutError = "Failed to read a polygon vertex normal.";
+					return false;
+				}
+
+				FVertex Vertex;
+				FVector LocalNormal;
+
+				for (int32 Component = 0; Component < 3; ++Component)
+				{
+					if (!IsWithinFloatRange(Position[Component])
+						|| !IsWithinFloatRange(SourceNormal[Component]))
+					{
+						OutError = "Mesh vertex data exceeds the engine numeric range.";
+						return false;
+					}
+
+					Vertex.Position[Component] = static_cast<float>(Position[Component]);
+					LocalNormal[Component] = static_cast<float>(SourceNormal[Component]);
+				}
+
+				// 노멀은 이동을 제외한 역전치 변환을 적용한다.
+				const FVector TransformedNormal = NormalMatrix.TransformVector(LocalNormal);
+				const double NormalLength = std::hypot(
+					static_cast<double>(TransformedNormal.X),
+					static_cast<double>(TransformedNormal.Y),
+					static_cast<double>(TransformedNormal.Z));
+
+				if (!std::isfinite(NormalLength) || NormalLength <= 1e-8)
+				{
+					OutError = "Mesh vertex has an invalid transformed normal.";
+					return false;
+				}
+
+				for (int32 Component = 0; Component < 3; ++Component)
+				{
+					Vertex.Normal[Component] = static_cast<float>(TransformedNormal[Component] / NormalLength);
+				}
+
+				if (UVSetName)
+				{
+					FbxVector2 SourceUV;
+					bool bUnmapped = false;
+
+					if (!Mesh->GetPolygonVertexUV(PolygonIndex, CornerIndex, UVSetName, SourceUV, bUnmapped) || bUnmapped)
+					{
+						OutError = "Failed to read a polygon vertex UV.";
+						return false;
+					}
+
+					// 기존 OBJ 임포터와 동일하게 V 방향을 뒤집는다.
+					const double U = SourceUV[0];
+					const double V = 1.0 - SourceUV[1];
+
+					if (!IsWithinFloatRange(U) || !IsWithinFloatRange(V))
+					{
+						OutError = "Mesh UV exceeds the engine numeric range.";
+						return false;
+					}
+
+					Vertex.UV = FVector2(static_cast<float>(U), static_cast<float>(V));
+				}
+
+				// UV가 없으면 기본값 (0, 0), 정점 색상은 기본값 흰색을 사용한다.
+				// 탄젠트는 최종 삼각형 인덱스 구성 후 계산한다.
+				FSkinWeightInfo SkinWeight;
+
+				if (MeshSkinWeights)
+				{
+					SkinWeight = (*MeshSkinWeights)[ControlPointIndex];
+				}
+
+				// Polygon Vertex마다 별도 생성해 UV와 노멀 경계를 보존한다.
+				// 위치와 Weight는 같은 Control Point에서 읽는다.
+				const uint32 VertexIndex = ImportedData.ReferenceVertices.Add(Vertex);
+				ImportedData.SkinWeights.Add(SkinWeight);
+				PolygonVertexIndices.Add(VertexIndex);
+			}
+		}
+	}
+
+	// 이후 여기에 삼각형 인덱스와 Section 등의 구성을 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
 
