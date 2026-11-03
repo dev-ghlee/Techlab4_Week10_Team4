@@ -103,6 +103,8 @@ protected:
 private:
 	// 이번 프레임 DeltaTime을 패널에 전달하고 에디터 단축키를 처리한다.
 	void BeginFrame(float DeltaTime);
+	// C의 Viewer 연결 전까지 Rigged_Man으로 CPU 스키닝을 직접 확인하는 임시 입력.
+	void HandleSkeletalMeshPreviewInput();
 	// 패널 요청과 입력을 적용해 레이아웃·카메라 상태를 갱신한다.
 	void UpdateViewportState(float DeltaTime);
 	// 월드를 정확히 한 번 Tick·Capture한 뒤 에디터 상호작용을 갱신한다.

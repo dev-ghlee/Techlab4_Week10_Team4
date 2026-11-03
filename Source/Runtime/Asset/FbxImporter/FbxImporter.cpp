@@ -10,6 +10,7 @@
 #include <cmath>
 #include <fbxsdk.h>
 #include <filesystem>
+#include <format>
 #include <limits>
 #include <system_error>
 #include <utility>
@@ -723,27 +724,8 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		return false;
 	}
 
-	// 교체가 끝난 Scene에서 Mesh를 다시 조회한다.
-	const int32 MeshCount = Scene->GetSrcObjectCount<FbxMesh>();
-	if (MeshCount == 0)
-	{
-		OutError = "FBX scene contains no meshes.";
-		return false;
-	}
-
-	// 각 Mesh의 Polygon이 모두 삼각형인지 확인한다.
-	for (int32 MeshIndex = 0; MeshIndex < MeshCount; ++MeshIndex)
-	{
-		FbxMesh* Mesh = Scene->GetSrcObject<FbxMesh>(MeshIndex);
-
-		if (!Mesh || !Mesh->IsTriangleMesh())
-		{
-			OutError = "FBX mesh triangulation verification failed.";
-			return false;
-		}
-	}
-
-	// 하나의 Context를 재귀 호출 전체에서 공유한다.
+	// 변환 후 노드가 실제로 사용하는 메시를 수집한다.
+	// Scene의 전체 Geometry 목록에는 노드에서 사용하지 않는 원본도 있을 수 있다.
 	FImportContext Context;
 	LoadSceneRecursive(Scene->GetRootNode(), Context);
 
@@ -751,6 +733,22 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 	{
 		OutError = "FBX scene contains no mesh nodes to import.";
 		return false;
+	}
+
+	// 정점 추출에 사용할 Polygon을 직접 확인한다. 빈 메시 노드는 수집 단계에서 제외한다.
+	for (FbxNode* MeshNode : Context.MeshNodes)
+	{
+		FbxMesh* Mesh = MeshNode->GetMesh();
+		for (int32 PolygonIndex = 0; PolygonIndex < Mesh->GetPolygonCount(); ++PolygonIndex)
+		{
+			const int32 PolygonSize = Mesh->GetPolygonSize(PolygonIndex);
+			if (PolygonSize != 3)
+			{
+				OutError = std::format("FBX mesh '{}' polygon {} has {} vertices after triangulation.",
+					MeshNode->GetName(), PolygonIndex, PolygonSize);
+				return false;
+			}
+		}
 	}
 
 	// 수집한 Mesh Node마다 연결된 Skin을 확인한다.
@@ -841,10 +839,13 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		FbxNode* CandidateRoot = nullptr;
 		FbxNode* Node = SkinCluster.Cluster->GetLink();
 
-		// 연결 본의 조상 중 가장 위에 있는 Skeleton Node를 찾는다.
+		// 공통 부모인 Null 노드도 본 계층의 루트로 사용할 수 있다.
 		while (Node && Node != SceneRoot)
 		{
-			if (Node->GetSkeleton())
+			const FbxNodeAttribute* Attribute = Node->GetNodeAttribute();
+			if (Attribute &&
+				(Attribute->GetAttributeType() == FbxNodeAttribute::eSkeleton ||
+				 Attribute->GetAttributeType() == FbxNodeAttribute::eNull))
 			{
 				CandidateRoot = Node;
 			}
@@ -1755,8 +1756,8 @@ void FFbxImporter::LoadSceneRecursive(FbxNode* Node, FImportContext& Context)
 		return;
 	}
 
-	// 이후 Transform과 재질 정보도 사용하므로 Mesh 대신 Node를 저장한다.
-	if (Node->GetMesh())
+	// 빈 메시 노드는 렌더링 대상이 아니다. Transform과 재질을 읽기 위해 Node를 보관한다.
+	if (FbxMesh* Mesh = Node->GetMesh(); Mesh && Mesh->GetPolygonCount() > 0)
 	{
 		Context.MeshNodes.Add(Node);
 	}
