@@ -183,6 +183,8 @@ void FSkeletalMeshEditorPanel::Tick(float DeltaTime)
 
 void FSkeletalMeshEditorPanel::OnRender()
 {
+	ImGui::SetNextWindowSize(ImVec2{ 2100.0f, 1200.0f }, ImGuiCond_FirstUseEver);
+
 	bool bPanelOpen = IsOpen();
 	bFocused = false;
 	if (ImGui::Begin(GetPanelName(), &bPanelOpen))
@@ -262,45 +264,6 @@ UWorld* FSkeletalMeshEditorPanel::ReleasePreviewWorld()
 	return World;
 }
 
-void FSkeletalMeshEditorPanel::SetSkeleton(const FReferenceSkeleton& Skeleton)
-{
-	ReferenceSkeleton = Skeleton;
-	PreviewPose.Skeleton = &ReferenceSkeleton;
-	PreviewPose.Reset();
-
-	Children.SetNum(ReferenceSkeleton.RawRefBoneInfo.Num());
-	for (int32 BoneIndex = 0; BoneIndex < ReferenceSkeleton.RawRefBoneInfo.Num(); ++BoneIndex)
-	{
-		const int32 ParentIndex = ReferenceSkeleton.RawRefBoneInfo[BoneIndex].ParentIndex;
-		if (ParentIndex >= 0)
-		{
-			Children[ParentIndex].Add(BoneIndex);
-		}
-	}
-
-	UndoStack.Reset();
-	RedoStack.Reset();
-	LastSnapshot = PreviewPose.LocalPose;
-
-	SelectBone(-1);
-}
-
-bool FSkeletalMeshEditorPanel::LoadMesh(const FString& Path)
-{
-	FString Error;
-	USkeletalMesh* Mesh = UAssetManager::Get().LoadFbxSkeletalMesh(Path, Path, Error);
-	if (!Mesh || !PreviewMeshComponent)
-	{
-		HTR_LOG(Error, "{}", Error);
-		return false;
-	}
-
-	PreviewMeshComponent->SetSkeletalMesh(Mesh);
-	SetSkeleton(Mesh->GetRefSkeleton());
-
-	return true;
-}
-
 bool FSkeletalMeshEditorPanel::OpenAsset(const FString& Path)
 {
 	if (!LoadMesh(Path))
@@ -338,7 +301,7 @@ void FSkeletalMeshEditorPanel::TickCameraInput()
 		.Wheel = static_cast<float>(IO.MouseWheel) * 120.0f,
 	};
 
-	ViewportClient.ApplyCameraInput(Input, IO.DeltaTime, 2.0f * Settings->CameraSpeed, 0.2f * Settings->MouseSensitivity);
+	ViewportClient.ApplyCameraInput(Input, IO.DeltaTime, CameraSpeed * Settings->CameraSpeed, 0.2f * Settings->MouseSensitivity);
 }
 
 void FSkeletalMeshEditorPanel::TickShortcut()
@@ -434,6 +397,63 @@ void FSkeletalMeshEditorPanel::DrawBoneTreeNode(int32 BoneIndex)
 
 		ImGui::TreePop();
 	}
+}
+
+void FSkeletalMeshEditorPanel::SetSkeleton(const FReferenceSkeleton& Skeleton)
+{
+	ReferenceSkeleton = Skeleton;
+	PreviewPose.Skeleton = &ReferenceSkeleton;
+	PreviewPose.Reset();
+
+	Children.SetNum(ReferenceSkeleton.RawRefBoneInfo.Num());
+	for (int32 BoneIndex = 0; BoneIndex < ReferenceSkeleton.RawRefBoneInfo.Num(); ++BoneIndex)
+	{
+		const int32 ParentIndex = ReferenceSkeleton.RawRefBoneInfo[BoneIndex].ParentIndex;
+		if (ParentIndex >= 0)
+		{
+			Children[ParentIndex].Add(BoneIndex);
+		}
+	}
+	PreviewPose.UpdateComponentSpace();
+
+	FVector Min{ FLT_MAX, FLT_MAX, FLT_MAX };
+	FVector Max{ -FLT_MAX, -FLT_MAX, -FLT_MAX };
+	for (const auto& Bone : PreviewPose.ComponentSpacePose)
+	{
+		const FVector Location = Bone.GetOrigin();
+		Min.X = std::min(Min.X, Location.X);
+		Max.X = std::max(Max.X, Location.X);
+		Min.Y = std::min(Min.Y, Location.Y);
+		Max.Y = std::max(Max.Y, Location.Y);
+		Min.Z = std::min(Min.Z, Location.Z);
+		Max.Z = std::max(Max.Z, Location.Z);
+	}
+	ViewportClient.SetViewRotation(FVector{ 20.0f, 0.0f, 0.0f });
+	ViewportClient.FocusBounds({ Min, Max });
+
+	CameraSpeed = std::max(1.0f, (Max - Min).Length() * 0.5f);
+
+	UndoStack.Reset();
+	RedoStack.Reset();
+	LastSnapshot = PreviewPose.LocalPose;
+
+	SelectBone(-1);
+}
+
+bool FSkeletalMeshEditorPanel::LoadMesh(const FString& Path)
+{
+	FString Error;
+	USkeletalMesh* Mesh = UAssetManager::Get().LoadFbxSkeletalMesh(Path, Path, Error);
+	if (!Mesh || !PreviewMeshComponent)
+	{
+		HTR_LOG(Error, "{}", Error);
+		return false;
+	}
+
+	PreviewMeshComponent->SetSkeletalMesh(Mesh);
+	SetSkeleton(Mesh->GetRefSkeleton());
+
+	return true;
 }
 
 void FSkeletalMeshEditorPanel::SelectBone(int32 BoneIndex)

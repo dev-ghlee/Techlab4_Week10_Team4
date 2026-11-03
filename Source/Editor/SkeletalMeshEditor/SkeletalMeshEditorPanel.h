@@ -30,8 +30,6 @@ public:
 	bool IsRenderMesh() const { return bRenderMesh; }
 	bool IsRenderBones() const { return bRenderBones || SelectedBoneIndex != -1; }
 
-	void SetSkeleton(const FReferenceSkeleton& Skeleton);
-	bool LoadMesh(const FString& Path);
 	bool OpenAsset(const FString& Path);
 	const FSkeletalPose& GetPreviewPose() const { return PreviewPose; }
 	int32 GetSelectedBoneIndex() const { return SelectedBoneIndex; }
@@ -43,6 +41,8 @@ private:
 	void DrawViewport();
 	void DrawBoneTreeNode(int32 BoneIndex);
 
+	void SetSkeleton(const FReferenceSkeleton& Skeleton);
+	bool LoadMesh(const FString& Path);
 	void SelectBone(int32 BoneIndex);
 	int32 PickBone(const FVector2& MousePosition);
 	void TickBoneGizmo(const ImVec2& ViewportMin);
@@ -59,6 +59,7 @@ private:
 	const FEditorSettings* Settings = nullptr;
 	bool bFocused = false;
 	bool bJustPicked = false;
+	float CameraSpeed = 1.0f;
 
 	FGizmo BoneGizmo;
 	FBoneGizmoTarget BoneGizmoTarget;
