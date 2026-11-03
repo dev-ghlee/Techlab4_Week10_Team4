@@ -26,6 +26,8 @@ struct FReferenceSkeleton
 
 	// 같은 인덱스의 본에 대응하는 부모 기준 로컬 Transform.
 	// 루트는 공통 SkeletalMesh 로컬 공간을 기준으로 한다.
+	// 루트의 바인드 스케일을 포함하므로 항등 Transform을 보장하지 않는다.
+	// 현재 포즈를 초기화할 때는 루트를 포함해 저장된 기준 포즈를 복사한다.
 	// RawRefBoneInfo와 개수 및 순서가 반드시 같아야 한다.
 	TArray<FTransform> RawRefBonePose;
 };

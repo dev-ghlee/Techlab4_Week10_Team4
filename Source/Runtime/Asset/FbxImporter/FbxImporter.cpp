@@ -57,7 +57,8 @@ struct FImportContext
 	// BoneNodes와 같은 순서의 루트 기준 바인드 전역 행렬.
 	TArray<FbxMatrix> BoneBindGlobals;
 
-	// Scene 전역 공간을 루트 본의 바인드 로컬 공간으로 변환한다.
+	// Scene 공간에서 루트의 위치·회전을 기준으로 하는 공간으로 변환한다.
+	// 크기를 변경하지 않으므로 Scene의 cm 단위와 원본 스케일을 유지한다.
 	FbxMatrix SceneToSkeletal;
 
 	// 각 Mesh의 Control Point를 루트 기준 공간으로 변환하는 행렬.
@@ -855,7 +856,39 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		return false;
 	}
 
-	Context.SceneToSkeletal = RootBindGlobal.Inverse();
+	FbxVector4 RootTranslation;
+	FbxVector4 RootShearing;
+	FbxVector4 RootScaling;
+	FbxQuaternion RootRotation;
+	double RootSign = 1.0;
+
+	// 원본 루트 바인드 행렬은 유지한 채 위치·회전을 추출한다.
+	// 공통 좌표계에는 스케일과 전단을 포함하지 않는다.
+	RootBindGlobal.GetElements(RootTranslation, RootRotation, RootShearing, RootScaling, RootSign);
+
+	for (int32 Component = 0; Component < 3; ++Component)
+	{
+		if (!std::isfinite(RootTranslation[Component]))
+		{
+			OutError = "Root bone bind translation is invalid.";
+			return false;
+		}
+	}
+
+	const double RotationLength = RootRotation.Length();
+
+	if (!std::isfinite(RotationLength) || RotationLength <= 1e-12)
+	{
+		OutError = "Root bone bind rotation is invalid.";
+		return false;
+	}
+
+	RootRotation.Normalize();
+
+	// 원점과 축 방향만 정의해 공통 좌표계 변환이 크기를 바꾸지 않도록 한다.
+	// 원본 스케일은 이후 메시 정점과 본의 기준 포즈에 남는다.
+	const FbxMatrix RootBasis(RootTranslation, RootRotation, FbxVector4(1, 1, 1));
+	Context.SceneToSkeletal = RootBasis.Inverse();
 
 	for (FbxNode* MeshNode : Context.MeshNodes)
 	{
