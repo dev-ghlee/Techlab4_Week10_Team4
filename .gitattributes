@@ -3,6 +3,11 @@
 ###############################################################################
 * text=auto
 
+# FBX SDK libraries exceed GitHub's regular file size limit.
+Source/ThirdParty/FBXSDK/lib/x64/*/libfbxsdk-md.lib filter=lfs diff=lfs merge=lfs -text
+Source/ThirdParty/FBXSDK/lib/x64/*/libxml2-md.lib filter=lfs diff=lfs merge=lfs -text
+Source/ThirdParty/FBXSDK/lib/x64/*/zlib-md.lib filter=lfs diff=lfs merge=lfs -text
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

@@ -16,7 +16,11 @@ enum class EAssetType
 };
 
 class UStaticMesh;
+class USkeletalMesh;
+class UMaterial;
 class USoundWave;
+struct FStaticMaterialSlot;
+struct FSkeletalMeshData;
 
 namespace fs = std::filesystem;
 
@@ -68,6 +72,9 @@ public:
 	USoundWave* LoadSound(const FString& Path);
 	static UStaticMesh* LoadObjStaticMesh(const FString& Path);
 
+	// Key는 조회 및 등록 식별자이고 Path는 실제 FBX 파일 경로다.
+	USkeletalMesh* LoadFbxSkeletalMesh(const FString& Key, const FString& Path, FString& OutError);
+
 	FLODGenerateResult GenerateStaticMeshLODs(UStaticMesh& Mesh,const FLODGenerateRequest& Request);
 
 	// 원본 좌표축이 엔진과 다른 메시를 로드 후 돌린다 (정점·법선·AABB·삼각형 BVH·GPU 정점 버퍼를 다시 만든다).
@@ -78,6 +85,12 @@ public:
 	static void ForEachObjStaticMesh(const std::function<void(const FString& Key, UStaticMesh& Mesh)>& Func);
 
 private:
+	// 슬롯의 색상과 텍스처 정보로 실제 재질을 생성한다.
+	TUniquePtr<UMaterial> CreateSkeletalMaterial(const FStaticMaterialSlot& Slot, FString& OutError);
+
+	// 검증된 원본 데이터로 공유 메시 리소스를 생성한다.
+	USkeletalMesh* CreateSkeletalMesh(FSkeletalMeshData&& MeshData, FString& OutError);
+
 	TMap<FString, FString> AssetPathMap;
 	TMap<FString, URenderAsset*> AssetMap;
 	TMap<FString, USoundWave*> SoundMap;

@@ -1,55 +1,86 @@
 #pragma once
 
 #include "Containers/Array.h"
-#include "Core/EngineString.h"
-#include "Math/Transform.h"
+#include "Core/NameTypes.h"
+#include "Core/Types.h"
+#include "Render/ReferenceSkeleton.h"
 #include "Math/Box.h"
-#include "Render/MeshDataTypes.h"
+#include "Math/Matrix.h"
+#include "Render/StaticMeshData.h"
 #include "Render/Vertex.h"
 
-inline constexpr uint32 MaxSkeletalMeshInfluences = 4;
-inline constexpr float SkeletalMeshWeightTolerance = 1.e-4f;
+class UMaterial;
 
-struct FSkeletalBone
+// 현재 구현에서 정점 하나에 허용할 최대 본 영향 개수.
+inline constexpr uint32 MaxBoneInfluences = 4;
+
+// 렌더링 정점 하나의 스키닝 정보.
+struct FSkinWeightInfo
 {
-	// 리소스 안에서 유일한 이름. 중복 FBX 이름은 임포터에서 경로 등으로 구분한다.
-	FString Name;
-	int32 ParentIndex = INDEX_NONE;
+	// 전체 RawRefBoneInfo 배열의 본 인덱스.
+	// Weight가 0인 미사용 슬롯의 인덱스는 무시한다.
+	int32 InfluenceBones[MaxBoneInfluences] = {};
 
-	// 이 규약의 기준 포즈는 바인드 포즈다. 부모가 없는 0번 본이 유일한 루트다.
-	FTransform ReferenceLocalTransform;
-
-	// 공통 메시 로컬 공간 -> 바인드 당시 본 로컬 공간. World 변환은 포함하지 않는다.
-	// 스키닝 행렬은 InverseBindMatrix * 현재 본의 Component 행렬로 계산한다.
-	FMatrix InverseBindMatrix = FMatrix::Identity;
+	// 같은 위치의 InfluenceBones에 대응하는 영향력.
+	// 유효한 영향들의 합은 1이며, 영향이 없으면 모두 0이다.
+	float InfluenceWeights[MaxBoneInfluences] = {};
 };
 
-struct FSkeletalVertexInfluences
+// 하나의 재질로 그릴 삼각형들의 연속된 인덱스 구간.
+struct FSkelMeshRenderSection
 {
-	// 리소스 전체 Bones 배열의 인덱스. Section 내부의 본 인덱스가 아니다.
-	uint16 BoneIndices[MaxSkeletalMeshInfluences]{};
-	// 양수 Weight만 활성 영향이다. 미사용 슬롯은 Weight 0, 합은 1이어야 한다.
-	float Weights[MaxSkeletalMeshInfluences]{};
+	// 전체 인덱스 배열에서 이 Section이 시작하는 위치.
+	uint32 BaseIndex = 0;
+
+	// 그릴 인덱스 개수는 NumTriangles * 3이다.
+	uint32 NumTriangles = 0;
+
+	// USkeletalMesh의 Materials 배열을 참조하는 인덱스.
+	uint16 MaterialIndex = 0;
 };
 
-// A(FBX 임포트) -> B(CPU 스키닝) 공용 CPU 데이터. SDK/GPU 객체를 보관하지 않는다.
-// 등록 후 공유 원본으로 취급하고 현재 자세/출력 정점은 컴포넌트별로 따로 보관한다.
+// 실제 재질과 슬롯 이름을 연결하는 런타임 재질 슬롯.
+struct FSkeletalMaterial
+{
+	// 현재 렌더러가 사용하는 구체적인 재질 객체를 참조한다.
+	UMaterial* MaterialInterface = nullptr;
+
+	// Viewer 표시와 슬롯 식별에 사용하는 이름.
+	FName MaterialSlotName;
+};
+
+// 임포트가 완료된 SkeletalMesh의 공유 원본 데이터.
+// 컴포넌트별 현재 포즈와 변형된 정점은 여기에 저장하지 않는다.
+// 임포트 결과의 규약: X-Forward / Y-Right / Z-Up, 길이 단위는 cm.
+// 행벡터 방식으로 본 전역 = 로컬 * 부모 전역,
+// 스키닝 행렬 = 역바인드 * 현재 본 전역 순서로 계산한다.
 struct FSkeletalMeshData
 {
-	// 바인드 포즈의 원본 정점. CPU 스키닝 결과는 별도 배열에 기록한다.
+	// 본 계층과 기준 로컬 포즈.
+	FReferenceSkeleton RefSkeleton;
+
+	// 기준 포즈의 본별 메시 공간 전역 행렬을 뒤집은 행렬.
+	// 메시 공간의 정점을 바인드 당시 본 공간으로 변환한다.
+	// RawRefBoneInfo와 개수 및 순서가 같아야 한다.
+	TArray<FMatrix> RefBasesInvMatrix;
+
+	// 공통 SkeletalMesh 로컬 공간의 기준 포즈 정점.
 	TArray<FVertex> ReferenceVertices;
+
+	// 전체 ReferenceVertices 배열을 직접 참조하는 삼각형 인덱스.
 	TArray<uint32> Indices;
-	TArray<FMeshSection> Sections;
-	TArray<FMeshMaterialSlot> MaterialSlots;
-	TArray<FSkeletalBone> Bones;
-	// ReferenceVertices와 같은 인덱스를 사용한다. UV 경계로 분리된 정점도 각각 가진다.
-	TArray<FSkeletalVertexInfluences> VertexInfluences;
+
+	// ReferenceVertices와 개수 및 순서가 같은 정점별 본 영향 정보.
+	TArray<FSkinWeightInfo> SkinWeights;
+
+	// 재질별로 구분한 인덱스 구간.
+	// 인덱스 구간 순서로 저장하며 모든 인덱스를 겹침 없이 포함한다.
+	TArray<FSkelMeshRenderSection> Sections;
+
+	// 실제 재질 생성에 필요한 이름, 색상, 텍스처 경로.
+	// Section.MaterialIndex와 최종 Materials의 슬롯 순서를 유지한다.
+	TArray<FStaticMaterialSlot> MaterialSlots;
+
+	// Importer가 최종 원본 정점으로 계산할 메시 로컬 공간 경계.
 	FBox ReferenceBounds{};
-
-	// 최종 정점을 확정한 뒤 임포터에서 호출한다. 빈 데이터면 원점의 빈 Bounds.
-	void UpdateReferenceBounds();
-
-	// 배열 크기/인덱스와 스키닝에 필요한 Weight만 검사한다. 원본 속성은 임포터가 준비한다.
-	// 보정 없이 실패 이유를 반환한다. 성공 시 OutError는 빈 문자열.
-	bool Validate(FString& OutError) const;
 };
