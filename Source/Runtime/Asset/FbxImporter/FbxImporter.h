@@ -44,6 +44,11 @@ private:
 	// 연결된 파일 텍스처를 찾아 FBX 파일 기준으로 경로를 해석한다.
 	static bool ReadMaterialTexturePath(const fbxsdk::FbxProperty& Property, const FString& FbxPath, FString& OutTexturePath, FString& OutError);
 
+	// 텍스처가 해당 Mesh에서 임포트할 첫 UV 세트를 사용하는지 검사한다.
+	static bool ValidateMaterialTextureUVSet(
+		const fbxsdk::FbxProperty& Property, const fbxsdk::FbxMesh& Mesh,
+		const char* UVSetName, FString& OutError);
+
 	// Polygon에 연결된 Mesh Node 로컬 재질 인덱스를 읽는다.
 	static bool ReadPolygonMaterialIndex(const fbxsdk::FbxMesh& Mesh, int32 PolygonIndex, int32& OutMaterialIndex, FString& OutError);
 

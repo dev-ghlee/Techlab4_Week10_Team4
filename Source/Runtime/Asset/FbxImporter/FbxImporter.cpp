@@ -295,6 +295,67 @@ bool FFbxImporter::ReadMaterialTexturePath(
 	return false;
 }
 
+bool FFbxImporter::ValidateMaterialTextureUVSet(
+	const FbxProperty& Property, const FbxMesh& Mesh,
+	const char* UVSetName, FString& OutError)
+{
+	if (!Property.IsValid())
+	{
+		return true;
+	}
+
+	const int32 TextureCount = Property.GetSrcObjectCount<FbxTexture>();
+
+	// 텍스처를 사용하지 않는 채널은 검사할 필요가 없다.
+	if (TextureCount == 0)
+	{
+		return true;
+	}
+
+	FbxFileTexture* Texture = TextureCount == 1
+		? FbxCast<FbxFileTexture>(Property.GetSrcObject<FbxTexture>(0))
+		: nullptr;
+
+	if (!Texture)
+	{
+		OutError = "Only one file texture per material channel is supported.";
+		return false;
+	}
+
+	// 현재 정점에는 UV 좌표만 저장하므로 다른 투영 방식은 지원하지 않는다.
+	if (Texture->GetMappingType() != FbxTexture::eUV)
+	{
+		OutError = "Only UV-mapped material textures are supported.";
+		return false;
+	}
+
+	if (!UVSetName || UVSetName[0] == '\0')
+	{
+		OutError = "A textured mesh requires a valid first UV set.";
+		return false;
+	}
+
+	const FbxString RequestedUVSet = Texture->UVSet.Get();
+
+	// 이름이 비어 있으면 첫 UV 세트를 사용하는 것으로 처리한다.
+	if (RequestedUVSet.IsEmpty())
+	{
+		return true;
+	}
+
+	// SDK 속성의 초기값인 "default"를 기본 세트 별칭으로 허용한다.
+	// 실제로 "default"라는 UV 세트가 있으면 해당 이름을 우선한다.
+	const bool bDefaultAlias = RequestedUVSet.Compare("default") == 0 && !Mesh.GetElementUV("default");
+
+	if (RequestedUVSet.Compare(UVSetName) != 0 && !bDefaultAlias)
+	{
+		OutError = "Material texture references a UV set other than the imported first UV set.";
+		return false;
+	}
+
+	return true;
+}
+
 bool FFbxImporter::ReadPolygonMaterialIndex(const FbxMesh& Mesh, int32 PolygonIndex, int32& OutMaterialIndex, FString& OutError)
 {
 	const FbxGeometryElementMaterial* MaterialElement = Mesh.GetElementMaterial(0);
@@ -1417,18 +1478,24 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		Mesh->GetUVSetNames(UVSetNames);
 		const char* UVSetName = UVSetNames.GetCount() > 0 ? UVSetNames.GetStringAt(0) : nullptr;
 
-		// UV가 없는 메시도 단색 재질이면 허용한다.
-		if (!UVSetName)
+		// 공유 재질이라도 Mesh마다 첫 UV 세트가 다를 수 있으므로 개별 검사한다.
+		for (int32 LocalMaterialIndex = 0; LocalMaterialIndex < MeshNode->GetMaterialCount(); ++LocalMaterialIndex)
 		{
-			for (uint16 MaterialIndex : Context.MeshMaterialIndices[MeshNode])
-			{
-				const FStaticMaterialSlot& Slot = ImportedData.MaterialSlots[MaterialIndex];
+			FbxSurfaceMaterial* Material = MeshNode->GetMaterial(LocalMaterialIndex);
 
-				if (!Slot.DiffuseTexturePath.empty() || !Slot.NormalTexturePath.empty())
-				{
-					OutError = "A textured mesh requires a UV set.";
-					return false;
-				}
+			// 빈 재질 항목은 앞서 구성한 기본 슬롯을 사용한다.
+			if (!Material)
+			{
+				continue;
+			}
+
+			const FbxProperty Diffuse = Material->FindProperty(FbxSurfaceMaterial::sDiffuse);
+			const FbxProperty Normal = Material->FindProperty(FbxSurfaceMaterial::sNormalMap);
+
+			if (!ValidateMaterialTextureUVSet(Diffuse, *Mesh, UVSetName, OutError)
+				|| !ValidateMaterialTextureUVSet(Normal, *Mesh, UVSetName, OutError))
+			{
+				return false;
 			}
 		}
 
