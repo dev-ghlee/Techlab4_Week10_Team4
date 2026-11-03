@@ -81,8 +81,8 @@ private:
 		FTransform Before;
 		FTransform After;
 	};
-	TArray<FBoneChange> UndoStack;
-	TArray<FBoneChange> RedoStack;
+	TArray<TArray<FBoneChange>> UndoStack;
+	TArray<TArray<FBoneChange>> RedoStack;
 	TArray<FTransform> LastSnapshot;
 	bool bWasAnyItemActive = false;
 };

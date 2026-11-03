@@ -195,7 +195,7 @@ void FSkeletalMeshEditorPanel::OnRender()
 		if (ImGui::BeginTable("##SkeletalMeshEditorLayout", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV))
 		{
 			ImGui::TableSetupColumn("Viewport", ImGuiTableColumnFlags_WidthStretch);
-			ImGui::TableSetupColumn("Tree", ImGuiTableColumnFlags_WidthFixed, 250.0f);
+			ImGui::TableSetupColumn("Tree", ImGuiTableColumnFlags_WidthFixed, 150.0f);
 
 			ImGui::TableNextColumn();
 
@@ -203,9 +203,16 @@ void FSkeletalMeshEditorPanel::OnRender()
 
 			ImGui::TableNextColumn();
 
-			if (ImGui::BeginChild("##SkeletonTree", ImVec2(0, 300), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY))
+			if (ImGui::BeginChild("##SkeletonTree", ImVec2(0, 850), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY))
 			{
 				ImGui::SeparatorText("Skeleton Tree");
+				ImGui::SameLine();
+
+				if (ImGui::Button("Reset All", ImVec2(150, 0)))
+				{
+					PreviewPose.LocalPose = ReferenceSkeleton.RawRefBonePose;
+				}
+
 				for (int32 Index = 0; Index < ReferenceSkeleton.RawRefBoneInfo.Num(); ++Index)
 				{
 					if (ReferenceSkeleton.RawRefBoneInfo[Index].ParentIndex < 0)
@@ -628,6 +635,7 @@ void FSkeletalMeshEditorPanel::DrawGizmoToolbar()
 void FSkeletalMeshEditorPanel::CommitUndo()
 {
 	bool bChanged = false;
+	TArray<FBoneChange> Changes;
 	for (int32 Index = 0; Index < PreviewPose.LocalPose.Num(); ++Index)
 	{
 		if (PreviewPose.LocalPose[Index] != LastSnapshot[Index])
@@ -636,7 +644,7 @@ void FSkeletalMeshEditorPanel::CommitUndo()
 			Change.BoneIndex = Index;
 			Change.Before = LastSnapshot[Index];
 			Change.After = PreviewPose.LocalPose[Index];
-			UndoStack.Push(Change);
+			Changes.Push(Change);
 			LastSnapshot[Index] = PreviewPose.LocalPose[Index];
 			bChanged = true;
 		}
@@ -645,6 +653,7 @@ void FSkeletalMeshEditorPanel::CommitUndo()
 	if (bChanged)
 	{
 		RedoStack.Reset();
+		UndoStack.Push(Changes);
 	}
 }
 
@@ -652,13 +661,19 @@ void FSkeletalMeshEditorPanel::Undo()
 {
 	if (UndoStack.Num() > 0)
 	{
-		const FBoneChange Change = UndoStack.Last();
+		const TArray<FBoneChange> Changes = UndoStack.Last();
 		UndoStack.Pop();
 		
-		PreviewPose.LocalPose[Change.BoneIndex] = Change.Before;
-		RedoStack.Push(Change);
+		for (const FBoneChange& Change : Changes)
+		{
+			PreviewPose.LocalPose[Change.BoneIndex] = Change.Before;
+		}
+		RedoStack.Push(Changes);
 
-		LastSnapshot[Change.BoneIndex] = Change.Before;
+		for (const FBoneChange& Change : Changes)
+		{
+			LastSnapshot[Change.BoneIndex] = Change.Before;
+		}
 	}
 }
 
@@ -666,13 +681,19 @@ void FSkeletalMeshEditorPanel::Redo()
 {
 	if (RedoStack.Num() > 0)
 	{
-		const FBoneChange Change = RedoStack.Last();
+		const TArray<FBoneChange> Changes = RedoStack.Last();
 		RedoStack.Pop();
 		
-		PreviewPose.LocalPose[Change.BoneIndex] = Change.After;
-		UndoStack.Push(Change);
+		for (const FBoneChange& Change : Changes)
+		{
+			PreviewPose.LocalPose[Change.BoneIndex] = Change.After;
+		}
+		UndoStack.Push(Changes);
 
-		LastSnapshot[Change.BoneIndex] = Change.After;
+		for (const FBoneChange& Change : Changes)
+		{
+			LastSnapshot[Change.BoneIndex] = Change.After;
+		}
 	}
 }
 
