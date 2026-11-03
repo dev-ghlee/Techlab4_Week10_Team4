@@ -1201,7 +1201,7 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 
 	for (const FFbxSkinCluster& SkinCluster : Context.SkinClusters)
 	{
-		const FbxCluster* Cluster = SkinCluster.Cluster;
+		FbxCluster* Cluster = SkinCluster.Cluster;
 		const int32* BoneIndex = Context.BoneIndexMap.Find(Cluster->GetLink());
 
 		const int32 InfluenceCount = Cluster->GetControlPointIndicesCount();
