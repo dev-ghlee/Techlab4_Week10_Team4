@@ -293,6 +293,69 @@ bool FFbxImporter::ReadMaterialTexturePath(
 	return false;
 }
 
+bool FFbxImporter::ReadPolygonMaterialIndex(const FbxMesh& Mesh, int32 PolygonIndex, int32& OutMaterialIndex, FString& OutError)
+{
+	const FbxGeometryElementMaterial* MaterialElement = Mesh.GetElementMaterial(0);
+
+	// 재질 할당 정보가 없으면 첫 로컬 재질을 사용한다.
+	// 재질이 없는 Node는 대응표의 첫 항목이 기본 슬롯을 가리킨다.
+	OutMaterialIndex = 0;
+
+	if (!MaterialElement || MaterialElement->GetMappingMode() == FbxLayerElement::eNone)
+	{
+		return true;
+	}
+
+	int32 MappingIndex = 0;
+
+	switch (MaterialElement->GetMappingMode())
+	{
+	case FbxLayerElement::eAllSame:
+		// 모든 Polygon이 IndexArray[0]의 재질을 사용한다.
+		MappingIndex = 0;
+		break;
+
+	case FbxLayerElement::eByPolygon:
+		// Polygon마다 재질 인덱스가 하나씩 있다.
+		MappingIndex = PolygonIndex;
+		break;
+
+	default:
+		OutError = "Unsupported FBX material mapping mode.";
+		return false;
+	}
+
+	// 재질은 일반 UV처럼 DirectArray를 조회하지 않는다.
+	// IndexArray의 값 자체가 Node에 연결된 재질의 인덱스다.
+	const FbxLayerElement::EReferenceMode ReferenceMode = MaterialElement->GetReferenceMode();
+
+	if (ReferenceMode != FbxLayerElement::eIndexToDirect
+		&& ReferenceMode != FbxLayerElement::eIndex)
+	{
+		OutError = "Unsupported FBX material reference mode.";
+		return false;
+	}
+
+	const FbxLayerElementArrayTemplate<int>& MaterialIndices = MaterialElement->GetIndexArray();
+
+	if (MappingIndex < 0 || MappingIndex >= MaterialIndices.GetCount())
+	{
+		OutError = "FBX polygon material mapping index is out of range.";
+		return false;
+	}
+
+	OutMaterialIndex = MaterialIndices.GetAt(MappingIndex);
+
+	// -1은 미할당 재질로 받아 기본 슬롯에 연결한다.
+	if (OutMaterialIndex < -1)
+	{
+		OutError = "FBX polygon contains an invalid material index.";
+		return false;
+	}
+
+	return true;
+}
+
 bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FString& OutError)
 {
 	OutError.clear();
@@ -1217,7 +1280,111 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		}
 	}
 
-	// 이후 여기에 삼각형 인덱스와 Section 등의 구성을 추가한다.
+	// 전체 재질 슬롯마다 삼각형 인덱스를 모을 배열을 준비한다.
+	TArray<TArray<uint32>> IndicesByMaterial;
+	IndicesByMaterial.SetNum(ImportedData.MaterialSlots.Num());
+
+	for (FbxNode* MeshNode : Context.MeshNodes)
+	{
+		FbxMesh* Mesh = MeshNode->GetMesh();
+		const TArray<uint32>* PolygonVertexIndices = Context.MeshPolygonVertexIndices.Find(MeshNode);
+		const TArray<uint16>* MaterialIndices = Context.MeshMaterialIndices.Find(MeshNode);
+		const FbxMatrix* MeshToSkeletal = Context.MeshToSkeletalMatrices.Find(MeshNode);
+
+		if (!Mesh || !PolygonVertexIndices || !MaterialIndices || !MeshToSkeletal)
+		{
+			OutError = "Failed to resolve mesh index construction data.";
+			return false;
+		}
+
+		const int32 PolygonCount = Mesh->GetPolygonCount();
+		const int64 ExpectedVertexCount = static_cast<int64>(PolygonCount) * 3;
+
+		if (PolygonVertexIndices->Num() != ExpectedVertexCount)
+		{
+			OutError = "Polygon vertex index count does not match the mesh.";
+			return false;
+		}
+
+		// SDK 변환 후의 Polygon 순서를 기준으로 삼는다.
+		// 공통 공간으로 옮기는 추가 변환이 반사이면 순서를 뒤집는다.
+		const bool bReverseWinding = MeshToSkeletal->Determinant() < 0.0;
+
+		for (int32 PolygonIndex = 0; PolygonIndex < PolygonCount; ++PolygonIndex)
+		{
+			int32 LocalMaterialIndex = 0;
+
+			if (!ReadPolygonMaterialIndex(*Mesh, PolygonIndex, LocalMaterialIndex, OutError))
+			{
+				return false;
+			}
+
+			// 재질 슬롯 구성에서 만든 기본 슬롯을 미할당 재질에 사용한다.
+			uint16 MaterialSlotIndex = DefaultMaterialIndex;
+
+			if (LocalMaterialIndex >= 0)
+			{
+				if (!MaterialIndices->IsValidIndex(LocalMaterialIndex))
+				{
+					OutError = "Polygon material index is outside the mesh material table.";
+					return false;
+				}
+
+				MaterialSlotIndex = (*MaterialIndices)[LocalMaterialIndex];
+			}
+
+			if (!IndicesByMaterial.IsValidIndex(MaterialSlotIndex))
+			{
+				OutError = "Polygon material slot index is out of range.";
+				return false;
+			}
+
+			uint32 TriangleIndices[3];
+
+			for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+			{
+				const int32 PolygonVertexIndex = PolygonIndex * 3 + CornerIndex;
+				TriangleIndices[CornerIndex] = (*PolygonVertexIndices)[PolygonVertexIndex];
+
+				if (TriangleIndices[CornerIndex] >= static_cast<uint32>(ImportedData.ReferenceVertices.Num()))
+				{
+					OutError = "Triangle references an invalid skeletal mesh vertex.";
+					return false;
+				}
+			}
+
+			auto& MaterialTriangleIndices = IndicesByMaterial[MaterialSlotIndex];
+
+			MaterialTriangleIndices.Add(TriangleIndices[0]);
+			MaterialTriangleIndices.Add(TriangleIndices[bReverseWinding ? 2 : 1]);
+			MaterialTriangleIndices.Add(TriangleIndices[bReverseWinding ? 1 : 2]);
+		}
+	}
+
+	// 정점이 Polygon Vertex별로 분리되어 있으므로 최종 인덱스 수도 같다.
+	ImportedData.Indices.Reserve(static_cast<uint32>(ImportedData.ReferenceVertices.Num()));
+
+	for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < IndicesByMaterial.Num(); ++MaterialSlotIndex)
+	{
+		const TArray<uint32>& MaterialTriangleIndices = IndicesByMaterial[MaterialSlotIndex];
+
+		// 실제 삼각형이 없는 재질은 Section을 만들지 않는다.
+		if (MaterialTriangleIndices.IsEmpty())
+		{
+			continue;
+		}
+
+		FSkelMeshRenderSection Section;
+		Section.BaseIndex = static_cast<uint32>(ImportedData.Indices.Num());
+		Section.NumTriangles = static_cast<uint32>(MaterialTriangleIndices.Num() / 3);
+		Section.MaterialIndex = static_cast<uint16>(MaterialSlotIndex);
+
+		// 같은 재질의 인덱스를 하나의 연속 구간으로 저장한다.
+		ImportedData.Indices.Append(MaterialTriangleIndices);
+		ImportedData.Sections.Add(Section);
+	}
+
+	// 이후 여기에 탄젠트와 기준 포즈 Bounds 계산 등을 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
 
