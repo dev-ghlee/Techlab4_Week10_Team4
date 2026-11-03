@@ -20,6 +20,7 @@ struct FSkeletalBone
 	FTransform ReferenceLocalTransform;
 
 	// 공통 메시 로컬 공간 -> 바인드 당시 본 로컬 공간. World 변환은 포함하지 않는다.
+	// 스키닝 행렬은 InverseBindMatrix * 현재 본의 Component 행렬로 계산한다.
 	FMatrix InverseBindMatrix = FMatrix::Identity;
 };
 
@@ -35,6 +36,7 @@ struct FSkeletalVertexInfluences
 // 등록 후 공유 원본으로 취급하고 현재 자세/출력 정점은 컴포넌트별로 따로 보관한다.
 struct FSkeletalMeshData
 {
+	// 바인드 포즈의 원본 정점. CPU 스키닝 결과는 별도 배열에 기록한다.
 	TArray<FVertex> ReferenceVertices;
 	TArray<uint32> Indices;
 	TArray<FMeshSection> Sections;
