@@ -112,6 +112,8 @@ function LinkFbxSdk()
 		"libfbxsdk-md.lib",
 		"libxml2-md.lib",
 		"zlib-md.lib",
+		-- libxml2가 사용하는 Windows 난수 생성 함수(BCryptGenRandom).
+		"bcrypt.lib",
 	}
 
 	filter "configurations:Debug or Benchmark_Debug"
