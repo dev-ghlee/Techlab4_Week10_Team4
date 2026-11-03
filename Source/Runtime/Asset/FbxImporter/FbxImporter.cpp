@@ -356,6 +356,124 @@ bool FFbxImporter::ReadPolygonMaterialIndex(const FbxMesh& Mesh, int32 PolygonIn
 	return true;
 }
 
+bool FFbxImporter::BuildTangentSpace(FSkeletalMeshData& MeshData, FString& OutError)
+{
+	auto& Vertices = MeshData.ReferenceVertices;
+	const auto& Indices = MeshData.Indices;
+
+	const int32 VertexCount = Vertices.Num();
+	const int32 IndexCount = Indices.Num();
+	constexpr float UVTolerance = 1e-8f;
+	constexpr float VectorToleranceSquared = 1e-12f;
+
+	if (VertexCount == 0 || IndexCount == 0 || IndexCount % 3 != 0)
+	{
+		OutError = "Tangent generation requires valid triangle data.";
+		return false;
+	}
+
+	TArray<FVector> TangentSums;
+	TArray<FVector> BitangentSums;
+	TangentSums.SetNum(VertexCount);
+	BitangentSums.SetNum(VertexCount);
+
+	for (int32 Index = 0; Index < IndexCount; Index += 3)
+	{
+		const uint32 TriangleIndices[3] =
+		{
+			Indices[Index], Indices[Index + 1], Indices[Index + 2]
+		};
+
+		for (uint32 VertexIndex : TriangleIndices)
+		{
+			if (VertexIndex >= static_cast<uint32>(VertexCount))
+			{
+				OutError = "Tangent generation found an invalid vertex index.";
+				return false;
+			}
+		}
+
+		const FVertex& VertexA = Vertices[TriangleIndices[0]];
+		const FVertex& VertexB = Vertices[TriangleIndices[1]];
+		const FVertex& VertexC = Vertices[TriangleIndices[2]];
+
+		const FVector Edge1 = VertexB.Position - VertexA.Position;
+		const FVector Edge2 = VertexC.Position - VertexA.Position;
+		const FVector2 DeltaUV1 = VertexB.UV - VertexA.UV;
+		const FVector2 DeltaUV2 = VertexC.UV - VertexA.UV;
+
+		const float Determinant = DeltaUV1.X * DeltaUV2.Y - DeltaUV1.Y * DeltaUV2.X;
+
+		if (!std::isfinite(Determinant))
+		{
+			OutError = "Tangent generation encountered an invalid UV determinant.";
+			return false;
+		}
+
+		// UV가 없거나 UV 삼각형의 면적이 거의 0이면 계산을 건너뛴다.
+		// 해당 정점에는 아래에서 노멀과 수직인 기본 탄젠트를 만든다.
+		if (std::abs(Determinant) <= UVTolerance)
+		{
+			continue;
+		}
+
+		const FVector Tangent = (Edge1 * DeltaUV2.Y - Edge2 * DeltaUV1.Y) / Determinant;
+		const FVector Bitangent = (Edge2 * DeltaUV1.X - Edge1 * DeltaUV2.X) / Determinant;
+
+		for (uint32 VertexIndex : TriangleIndices)
+		{
+			TangentSums[VertexIndex] += Tangent;
+			BitangentSums[VertexIndex] += Bitangent;
+		}
+	}
+
+	for (int32 VertexIndex = 0; VertexIndex < VertexCount; ++VertexIndex)
+	{
+		FVertex& Vertex = Vertices[VertexIndex];
+		const FVector Normal = Vertex.Normal.GetSafeNormal(VectorToleranceSquared);
+
+		if (Normal.SizeSquared() <= VectorToleranceSquared)
+		{
+			OutError = "Tangent generation requires a valid vertex normal.";
+			return false;
+		}
+
+		// 탄젠트에서 노멀 방향 성분을 제거해 두 축을 수직으로 만든다.
+		FVector Tangent = TangentSums[VertexIndex] - Normal * Normal.Dot(TangentSums[VertexIndex]);
+		float TangentLengthSquared = Tangent.SizeSquared();
+
+		if (!std::isfinite(TangentLengthSquared))
+		{
+			OutError = "Generated tangent exceeds the supported numeric range.";
+			return false;
+		}
+
+		if (TangentLengthSquared <= VectorToleranceSquared)
+		{
+			// 노멀과 거의 평행하지 않은 축을 선택해 기본 탄젠트를 만든다.
+			const FVector Axis = std::abs(Normal.X) < 0.9f ? FVector(1, 0, 0) : FVector(0, 1, 0);
+			Tangent = Axis - Normal * Normal.Dot(Axis);
+			TangentLengthSquared = Tangent.SizeSquared();
+		}
+
+		Tangent = Tangent / std::sqrt(TangentLengthSquared);
+
+		// 셰이더에서 B = cross(N, T) * Tangent.W로 복원할 부호다.
+		const float Orientation = Normal.Cross(Tangent).Dot(BitangentSums[VertexIndex]);
+
+		if (!std::isfinite(Orientation))
+		{
+			OutError = "Generated bitangent orientation is invalid.";
+			return false;
+		}
+
+		const float Handedness = Orientation < 0.0f ? -1.0f : 1.0f;
+		Vertex.Tangent = FVector4(Tangent, Handedness);
+	}
+
+	return true;
+}
+
 bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FString& OutError)
 {
 	OutError.clear();
@@ -1384,7 +1502,29 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		ImportedData.Sections.Add(Section);
 	}
 
-	// 이후 여기에 탄젠트와 기준 포즈 Bounds 계산 등을 추가한다.
+	if (!BuildTangentSpace(ImportedData, OutError))
+	{
+		return false;
+	}
+
+	// 탄젠트 생성이 성공했으므로 정점 배열은 비어 있지 않다.
+	// 첫 정점으로 시작해야 원점이 불필요하게 Bounds에 포함되지 않는다.
+	FBox ReferenceBounds;
+	ReferenceBounds.Min = ImportedData.ReferenceVertices[0].Position;
+	ReferenceBounds.Max = ReferenceBounds.Min;
+
+	for (const FVertex& Vertex : ImportedData.ReferenceVertices)
+	{
+		for (int32 Component = 0; Component < 3; ++Component)
+		{
+			ReferenceBounds.Min[Component] = std::min(ReferenceBounds.Min[Component], Vertex.Position[Component]);
+			ReferenceBounds.Max[Component] = std::max(ReferenceBounds.Max[Component], Vertex.Position[Component]);
+		}
+	}
+
+	ImportedData.ReferenceBounds = ReferenceBounds;
+
+	// 이후 여기에 최종 유효성 검사를 추가한다.
 	// 완성된 임시 데이터를 OutData에 이동한 뒤 true를 반환한다.
 	OutError = "Skeletal mesh data extraction is not implemented yet.";
 

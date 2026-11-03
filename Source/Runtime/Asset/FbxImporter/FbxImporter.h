@@ -49,6 +49,9 @@ private:
 	// Polygon에 연결된 Mesh Node 로컬 재질 인덱스를 읽는다.
 	static bool ReadPolygonMaterialIndex(const fbxsdk::FbxMesh& Mesh, int32 PolygonIndex, int32& OutMaterialIndex, FString& OutError);
 
+	// 최종 정점과 삼각형 인덱스로 탄젠트와 Bitangent 방향 부호를 계산한다.
+	static bool BuildTangentSpace(FSkeletalMeshData& MeshData, FString& OutError);
+
 	// 현재 Node에서 필요한 대상을 수집하고 자식마다 재귀 호출한다.
 	static void LoadSceneRecursive(fbxsdk::FbxNode* Node, FImportContext& Context);
 };
