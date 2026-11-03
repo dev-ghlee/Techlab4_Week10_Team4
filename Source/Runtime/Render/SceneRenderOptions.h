@@ -16,7 +16,7 @@ struct FSceneRenderOptions
 	bool bShowCascade = false;
 	bool bShowShadowMask = false;   // 언리얼 구조 그림자의 ScreenShadowMask를 화면에 띄운다 (Deferred)
 	bool bShowWorldNormal = false;
-	bool bShowLightCulling = false;
+	bool bShowLightCulling = false;	
 	float SceneDepthRange = 1.0f;
 	uint32 DirectionalShadowMapSize = 0;
 	uint32 PointShadowMapSize = 0;
@@ -26,6 +26,7 @@ struct FSceneRenderOptions
 	float DisplayGamma = 2.2f;
 	bool bShowVignette = true;
 	bool bShowCameraOverlay = true;
+	bool bShowDecal = true;
 
 	ERenderingPath RenderingPath = ERenderingPath::Deferred;
 	ELightingModel LightingModel = ELightingModel::Gouraud;

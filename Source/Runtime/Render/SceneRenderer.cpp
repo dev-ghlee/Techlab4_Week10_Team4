@@ -217,6 +217,11 @@ bool FSceneRenderer::AddDecalPass(FRenderGraphBuilder& Graph, FRenderer* Rendere
 		return false;
 	}
 
+	if(!Options.bShowDecal)
+	{
+		return true;
+	}
+
 	FScene& Scene = World->GetScene();
 	const auto& Decals = Scene.GetDecalProxies();
 	if(Decals.IsEmpty())

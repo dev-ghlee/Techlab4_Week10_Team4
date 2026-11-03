@@ -4,6 +4,8 @@
 #include "DecalActor.generated.h"
 
 class UDecalComponent;
+class UBillboardComponent;
+
 
 UCLASS()
 class ADecalActor : public AActor
@@ -17,4 +19,5 @@ public:
 
 private:
 	UDecalComponent* DecalComponent;
+	UBillboardComponent* SpriteComponent;
 };

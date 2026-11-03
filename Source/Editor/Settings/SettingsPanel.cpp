@@ -95,6 +95,7 @@ void FSettingsPanel::OnRender()
 	ImGui::EndDisabled();
 	ImGui::Checkbox("Vignette", &Settings.bShowVignette);
 	ImGui::Checkbox("Camera Fade / Letterbox", &Settings.bShowCameraOverlay);
+	ImGui::Checkbox("Show Decal", &Settings.bShowDecal);
 
 	if (ImGui::TreeNode("Camera Overlay Debug"))
 	{
@@ -198,6 +199,7 @@ bool FSettingsPanel::SaveSettings() const
 	File << "DisplayGamma=" << Settings.DisplayGamma << "\n";
 	File << "ShowVignette=" << Settings.bShowVignette << "\n";
 	File << "ShowCameraOverlay=" << Settings.bShowCameraOverlay << "\n";
+	File << "ShowDecal=" << Settings.bShowDecal << "\n";
 
 	File << "LightCullingMode=" << (Settings.LightCullingMode == ELightCullingMode::Off ? "Off" : Settings.LightCullingMode == ELightCullingMode::Tiled ? "Tiled" : "Clustered") << "\n";
 	File << "RenderingPath=" << (Settings.RenderingPath == ERenderingPath::Forward ? "Forward" : "Deferred") << "\n";
@@ -348,6 +350,7 @@ bool FSettingsPanel::LoadSettings()
 				else if (Key == "DisplayGamma")      Settings.DisplayGamma = std::stof(ValueStr);
 				else if (Key == "ShowVignette")      Settings.bShowVignette = std::stoi(ValueStr);
 				else if (Key == "ShowCameraOverlay") Settings.bShowCameraOverlay = std::stoi(ValueStr);
+				else if (Key == "ShowDecal")         Settings.bShowDecal = std::stoi(ValueStr);
 
 				else if (Key == "LightCullingMode")
 				{
