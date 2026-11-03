@@ -11,6 +11,7 @@
 #include "Render/RenderResourceManager.h"
 
 #include "Asset/ObjImporter/ObjImporter.h"
+#include "Asset/FbxImporter/FbxImporter.h"
 
 #include "Render/GeometryGenerator.h"
 #include "UObject/UObjectGlobals.h"
@@ -323,6 +324,14 @@ void UAssetManager::LoadAsset(const FString& Key, const FString& Path) {
 	if (Extension == ".obj") {
 		LoadObjStaticMesh(Path);
 	}
+	if (Extension == ".fbx")
+	{
+		FString Error;
+		if (!LoadFbxSkeletalMesh(Key, Path, Error))
+		{
+			HTR_LOG(Error, "Failed to load FBX '{}': {}", Path, Error);
+		}
+	}
 }
 
 void UAssetManager::CreateDefaultTextures() {
@@ -575,6 +584,45 @@ UStaticMesh* UAssetManager::LoadObjStaticMesh(const FString& Path)
 
 	Get().RegisterAsset(Key, Mesh);
 	return Mesh;
+}
+
+USkeletalMesh* UAssetManager::LoadFbxSkeletalMesh(const FString& Key, const FString& Path, FString& OutError)
+{
+	OutError.clear();
+
+	// 같은 키로 등록된 메시가 있으면 임포트와 GPU 자원 생성을 생략한다.
+	URenderAsset** CachedAsset = AssetMap.Find(Key);
+	if (CachedAsset && *CachedAsset)
+	{
+		USkeletalMesh* CachedMesh = Cast<USkeletalMesh>(*CachedAsset);
+		if (!CachedMesh)
+		{
+			// 다른 타입의 에셋을 같은 키로 덮어쓰지 않는다.
+			OutError = "Asset key is already used by another asset type: " + Key;
+		}
+
+		return CachedMesh;
+	}
+
+	// SDK 객체를 포함하지 않는 엔진 원본 데이터를 받는다.
+	FSkeletalMeshData MeshData;
+	if (!FFbxImporter::LoadScene(Path, MeshData, OutError))
+	{
+		return nullptr;
+	}
+
+	// 현재 객체의 private 생성 함수를 호출한다.
+	USkeletalMesh* SkeletalMesh = CreateSkeletalMesh(std::move(MeshData), OutError);
+	if (!SkeletalMesh)
+	{
+		return nullptr;
+	}
+
+	// 완성된 리소스만 등록한다. 실패 결과는 캐시에 남기지 않는다.
+	RegisterAsset(Key, SkeletalMesh);
+	AssetPathMap.Add(Key, Path);
+
+	return SkeletalMesh;
 }
 
 bool UAssetManager::ReorientStaticMesh(UStaticMesh& Mesh, const std::function<FVector(const FVector&)>& Rotate)
