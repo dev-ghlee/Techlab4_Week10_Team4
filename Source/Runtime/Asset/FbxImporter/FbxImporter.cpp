@@ -169,17 +169,25 @@ bool FFbxImporter::ConvertFbxMatrixToTransform(const FbxMatrix& InMatrix, FTrans
 		FbxQuaternion(EngineRotation.X, EngineRotation.Y, EngineRotation.Z, EngineRotation.W),
 		FbxVector4(Converted.Scale.X, Converted.Scale.Y, Converted.Scale.Z));
 
-	// 전단 손실이나 회전 변환 오차가 허용 범위를 넘으면 실패한다.
+	// 축 길이의 0.01% 수준까지 TRS 근사 오차를 허용한다.
+	constexpr double LinearAbsoluteTolerance = 1e-6;
+	constexpr double LinearRelativeTolerance = 1e-4;
+	constexpr double TranslationToleranceCm = 1e-3;
+	constexpr double AffineTolerance = 1e-8;
+
 	for (int32 Row = 0; Row < 4; ++Row)
 	{
+		const FbxVector4 Axis(InMatrix.Get(Row, 0), InMatrix.Get(Row, 1), InMatrix.Get(Row, 2), 0.0);
+		const double LinearTolerance = LinearAbsoluteTolerance + LinearRelativeTolerance * Axis.Length();
+		const double RowTolerance = Row == 3 ? TranslationToleranceCm : LinearTolerance;
+
 		for (int32 Column = 0; Column < 4; ++Column)
 		{
 			const double Expected = InMatrix.Get(Row, Column);
 			const double Actual = Rebuilt.Get(Row, Column);
-			const double Tolerance = 1e-5 * (1.0 + std::abs(Expected));
+			const double Tolerance = Column == 3 ? AffineTolerance : RowTolerance;
 
-			if (!std::isfinite(Expected) || !std::isfinite(Actual)
-				|| std::abs(Expected - Actual) > Tolerance)
+			if (!std::isfinite(Expected) || !std::isfinite(Actual) || std::abs(Expected - Actual) > Tolerance)
 			{
 				OutError = "Bone transform cannot be preserved as TRS.";
 				return false;
@@ -913,22 +921,7 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 	FbxMatrix RootBindGlobal;
 	bool bFoundRootBind = false;
 
-	// 루트 본이 Cluster에 직접 연결되어 있다면 바인드 행렬을 읽는다.
-	for (const FFbxSkinCluster& SkinCluster : Context.SkinClusters)
-	{
-		if (SkinCluster.Cluster->GetLink() == Context.RootBoneNode)
-		{
-			FbxAMatrix LinkBindGlobal;
-			SkinCluster.Cluster->GetTransformLinkMatrix(LinkBindGlobal);
-
-			RootBindGlobal = FbxMatrix(LinkBindGlobal);
-			bFoundRootBind = true;
-			break;
-		}
-	}
-
-	// 루트는 정점에 직접 영향을 주지 않아 Cluster가 없을 수도 있다.
-	// 이 경우 Scene의 Bind Pose에서 루트의 전역 행렬을 찾는다.
+	// SDK가 TRS로 재구성한 Cluster 행렬보다 원본 Bind Pose 행렬을 우선한다.
 	for (int32 PoseIndex = 0; !bFoundRootBind && PoseIndex < Scene->GetPoseCount(); ++PoseIndex)
 	{
 		FbxPose* Pose = Scene->GetPose(PoseIndex);
@@ -938,11 +931,33 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		}
 
 		const int32 RootPoseIndex = Pose->Find(Context.RootBoneNode);
-		if (RootPoseIndex >= 0)
+		if (RootPoseIndex < 0)
 		{
-			RootBindGlobal = Pose->GetMatrix(RootPoseIndex);
-			bFoundRootBind = true;
+			continue;
 		}
+
+		RootBindGlobal = Pose->GetMatrix(RootPoseIndex);
+		bFoundRootBind = true;
+	}
+
+	// Bind Pose에 루트가 없을 때만 Cluster의 바인드 행렬로 보완한다.
+	for (const FFbxSkinCluster& SkinCluster : Context.SkinClusters)
+	{
+		if (bFoundRootBind)
+		{
+			break;
+		}
+
+		if (SkinCluster.Cluster->GetLink() != Context.RootBoneNode)
+		{
+			continue;
+		}
+
+		FbxAMatrix LinkBindGlobal;
+		SkinCluster.Cluster->GetTransformLinkMatrix(LinkBindGlobal);
+
+		RootBindGlobal = FbxMatrix(LinkBindGlobal);
+		bFoundRootBind = true;
 	}
 
 	if (!bFoundRootBind)
@@ -951,7 +966,7 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		return false;
 	}
 
-	// 원점과 축을 되돌리려면 역행렬이 존재해야 한다.
+	// 이후 본의 로컬 변환과 역바인드 계산을 위해 역행렬이 존재해야 한다.
 	const double Determinant = RootBindGlobal.Determinant();
 	if (!std::isfinite(Determinant) || Determinant == 0.0)
 	{
@@ -959,18 +974,13 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		return false;
 	}
 
+	// 엔진 좌표계로 변환된 루트의 전역 위치만 읽는다.
 	FbxVector4 RootTranslation;
-	FbxVector4 RootShearing;
-	FbxVector4 RootScaling;
-	FbxQuaternion RootRotation;
-	double RootSign = 1.0;
-
-	// 원본 루트 바인드 행렬은 유지한 채 위치·회전을 추출한다.
-	// 공통 좌표계에는 스케일과 전단을 포함하지 않는다.
-	RootBindGlobal.GetElements(RootTranslation, RootRotation, RootShearing, RootScaling, RootSign);
 
 	for (int32 Component = 0; Component < 3; ++Component)
 	{
+		RootTranslation[Component] = RootBindGlobal.Get(3, Component);
+
 		if (!std::isfinite(RootTranslation[Component]))
 		{
 			OutError = "Root bone bind translation is invalid.";
@@ -978,19 +988,11 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		}
 	}
 
-	const double RotationLength = RootRotation.Length();
+	// 회전은 항등 회전, 스케일은 1로 두어 위치만 제거한다.
+	const FbxQuaternion IdentityRotation(0.0, 0.0, 0.0, 1.0);
+	const FbxVector4 UnitScale(1.0, 1.0, 1.0);
+	const FbxMatrix RootBasis(RootTranslation, IdentityRotation, UnitScale);
 
-	if (!std::isfinite(RotationLength) || RotationLength <= 1e-12)
-	{
-		OutError = "Root bone bind rotation is invalid.";
-		return false;
-	}
-
-	RootRotation.Normalize();
-
-	// 원점과 축 방향만 정의해 공통 좌표계 변환이 크기를 바꾸지 않도록 한다.
-	// 원본 스케일은 이후 메시 정점과 본의 기준 포즈에 남는다.
-	const FbxMatrix RootBasis(RootTranslation, RootRotation, FbxVector4(1, 1, 1));
 	Context.SceneToSkeletal = RootBasis.Inverse();
 
 	for (FbxNode* MeshNode : Context.MeshNodes)
@@ -1109,28 +1111,9 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		ImportedData.RefSkeleton.RawRefBoneInfo.Add(BoneInfo);
 	}
 
-	// Cluster에 연결된 본의 Scene 기준 바인드 전역 행렬을 모은다.
-	TMap<FbxNode*, FbxMatrix> BoneBindSceneGlobals;
+	// Bind Pose의 원본 전역 행렬을 먼저 모아 본별 바인드 기준으로 사용한다.
+	TMap<FbxNode*, FbxMatrix> BindPoseSceneGlobals;
 
-	for (const FFbxSkinCluster& SkinCluster : Context.SkinClusters)
-	{
-		FbxNode* BoneNode = SkinCluster.Cluster->GetLink();
-		FbxAMatrix LinkBindGlobal;
-		SkinCluster.Cluster->GetTransformLinkMatrix(LinkBindGlobal);
-		const FbxMatrix BindGlobal(LinkBindGlobal);
-
-		const FbxMatrix* Existing = BoneBindSceneGlobals.Find(BoneNode);
-		if (Existing && !AreBindMatricesNearlyEqual(*Existing, BindGlobal))
-		{
-			OutError = "FBX bone contains inconsistent cluster bind transforms.";
-			return false;
-		}
-
-		BoneBindSceneGlobals.Add(BoneNode, BindGlobal);
-	}
-
-	// Bind Pose에서 Cluster에 직접 연결되지 않은 본의 행렬도 모은다.
-	// 기존 행렬과 다르면 동일한 기준 포즈로 처리할 수 없다.
 	for (int32 PoseIndex = 0; PoseIndex < Scene->GetPoseCount(); ++PoseIndex)
 	{
 		FbxPose* Pose = Scene->GetPose(PoseIndex);
@@ -1148,15 +1131,44 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 			}
 
 			const FbxMatrix& BindGlobal = Pose->GetMatrix(EntryIndex);
-			const FbxMatrix* Existing = BoneBindSceneGlobals.Find(BoneNode);
-			if (Existing && !AreBindMatricesNearlyEqual(*Existing, BindGlobal))
+			const FbxMatrix* Existing = BindPoseSceneGlobals.Find(BoneNode);
+			if (Existing)
 			{
-				OutError = "FBX bind poses contain inconsistent bone transforms.";
-				return false;
+				if (!AreBindMatricesNearlyEqual(*Existing, BindGlobal))
+				{
+					OutError = "Conflicting bind poses for the same bone.";
+					return false;
+				}
+
+				continue;
 			}
 
-			BoneBindSceneGlobals.Add(BoneNode, BindGlobal);
+			BindPoseSceneGlobals.Add(BoneNode, BindGlobal);
 		}
+	}
+
+	TMap<FbxNode*, FbxMatrix> BoneBindSceneGlobals = BindPoseSceneGlobals;
+
+	// Bind Pose에 없는 본만 Cluster로 보완하며, Cluster 간 불일치는 계속 검사한다.
+	for (const FFbxSkinCluster& SkinCluster : Context.SkinClusters)
+	{
+		FbxNode* BoneNode = SkinCluster.Cluster->GetLink();
+		if (BindPoseSceneGlobals.Contains(BoneNode))
+		{
+			continue;
+		}
+
+		FbxAMatrix LinkBindGlobal;
+		SkinCluster.Cluster->GetTransformLinkMatrix(LinkBindGlobal);
+		const FbxMatrix BindGlobal(LinkBindGlobal);
+		const FbxMatrix* Existing = BoneBindSceneGlobals.Find(BoneNode);
+		if (Existing && !AreBindMatricesNearlyEqual(*Existing, BindGlobal))
+		{
+			OutError = "FBX bone contains inconsistent cluster bind transforms.";
+			return false;
+		}
+
+		BoneBindSceneGlobals.Add(BoneNode, BindGlobal);
 	}
 
 	for (int32 BoneIndex = 0; BoneIndex < Context.BoneNodes.Num(); ++BoneIndex)

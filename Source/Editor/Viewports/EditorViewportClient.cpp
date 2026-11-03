@@ -26,7 +26,8 @@ void FEditorViewportClient::FocusBounds(const FBox& WorldBounds) {
   const FVector Center = (WorldBounds.Min + WorldBounds.Max) * 0.5f;
   const float Radius = FMath::Max(
       (WorldBounds.Max - WorldBounds.Min).Size() * 0.5f, 1.0f);
-  const float FramingRadius = Radius * 1.1f;
+  constexpr float FramingMargin = 1.4f;
+  const float FramingRadius = Radius * FramingMargin;
   const float SafeAspectRatio = FMath::Max(AspectRatio, 0.01f);
 
   // 직교 뷰는 화면 크기를 OrthoWidth로 정하고, 모델 앞에 카메라를 둔다.

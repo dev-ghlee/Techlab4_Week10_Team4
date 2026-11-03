@@ -413,7 +413,7 @@ void UEditorEngine::HandleSkeletalMeshPreviewInput()
 	{
 		FString Error;
 		USkeletalMesh* Mesh = UAssetManager::Get().LoadFbxSkeletalMesh(
-			"Models/Rigged_Man/SKM_Manny_Simple.fbx", "Assets/Models/Skeleton/SKM_Manny_Simple.fbx", Error);
+			"Models/Rigged_Man/SKM_Manny_Simple.fbx", "Assets/Models/RiggedMan/rigged_man.fbx", Error);
 		if (!Mesh)
 		{
 			HTR_LOG(Error, "Rigged_Man preview: {}", Error);
