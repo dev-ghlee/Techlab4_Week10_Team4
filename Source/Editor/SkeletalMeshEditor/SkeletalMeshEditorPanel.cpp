@@ -4,6 +4,8 @@
 #include "Camera/ViewportCameraMovement.h"
 #include "Editor/Settings/SettingsPanel.h"
 #include "Engine/World.h"
+#include "Asset/AssetManager.h"
+#include "GameFramework/Actor/StaticMeshActor.h"
 
 namespace
 {
@@ -142,12 +144,24 @@ bool FSkeletalMeshEditorPanel::Init()
 
 	BuildDummySkeleton();
 
+	// TEMP: 본 오버레이 테스트용 메시. 스킨 메시 연동 후 제거
+	const FTransform TestMeshTransform{ FRotator::Identity, FVector{ 0.0f, 0.0f, 1.5f }, FVector{ 0.5f, 1.2f, 1.2f } };
+	if (AStaticMeshActor* TestMeshActor = PreviewWorld->SpawnActor<AStaticMeshActor>("TestMesh", &TestMeshTransform))
+	{
+		TestMeshActor->GetStaticMeshComponent()->SetStaticMesh(UAssetManager::GetAssetByPath<UStaticMesh>("Cube"));
+	}
+
 	return true;
 }
 
 void FSkeletalMeshEditorPanel::Tick(float DeltaTime)
 {
 	PreviewPose.UpdateComponentSpace();
+
+	if (PreviewWorld)
+	{
+		PreviewWorld->GetScene().UpdateAllTransforms();
+	}
 }
 
 void FSkeletalMeshEditorPanel::OnRender()

@@ -736,14 +736,6 @@ void UEditorEngine::RenderSkeletalMeshPreview()
 					{
 						// TODO: 스킨 메시 그리는 코드...
 					}
-					if (SkeletalMeshEditorPanel->IsRenderBones())
-					{
-						BoneRenderer->OnRender(
-							SkeletalMeshEditorPanel->GetPreviewPose(),
-							SkeletalMeshEditorPanel->GetSelectedBoneIndex(),
-							SceneView.ViewProjectionMatrix,
-							SceneView.ViewLocation);
-					}
 				};
 
 			if (SkeletalMeshEditorPanel->IsRenderGrid())
@@ -768,6 +760,18 @@ void UEditorEngine::RenderSkeletalMeshPreview()
 							static_cast<float>(SettingsPanel->GetSettings().GridSpacing),
 							SceneView.bIsPerspective,
 							ViewportSettings);
+					};
+			}
+
+			if (SkeletalMeshEditorPanel->IsRenderBones())
+			{
+				Overlays.EditorBones = [this, &SceneView]
+					{
+						BoneRenderer->OnRender(
+							SkeletalMeshEditorPanel->GetPreviewPose(),
+							SkeletalMeshEditorPanel->GetSelectedBoneIndex(),
+							SceneView.ViewProjectionMatrix,
+							SceneView.ViewLocation);
 					};
 			}
 

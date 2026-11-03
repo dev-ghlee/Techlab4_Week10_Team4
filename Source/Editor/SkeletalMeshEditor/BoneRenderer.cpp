@@ -6,16 +6,17 @@
 
 namespace
 {
-	FVector4 GetDisplayColor(bool Selected)
+	FVector4 GetDisplayColor(bool Selected, float Alpha)
 	{
 		if (Selected)
 		{
-			return { 0.87f, 0.56f, 0.13f, 1.0f };
+			return { 0.87f, 0.56f, 0.13f, Alpha };
 		}
-		return { 0.3f, 0.31f, 0.41f, 1.0f };
+		return { 0.3f, 0.31f, 0.41f, Alpha };
 	}
 
-	constexpr float JointRadiusRatio = 0.07f;
+	constexpr float OccludedAlpha = 0.3f;
+
 	constexpr float DefaultJointRadius = 0.05f;
 
 	struct FConstantData
@@ -43,6 +44,10 @@ bool FBoneRenderer::Init(FRenderer* InRenderer)
 	PipelineState.Shader = Shader;
 	PipelineState.Topology = EPrimitiveTopology::TriangleList;
 
+	OccludedPipelineState = PipelineState;
+	OccludedPipelineState.DepthStencilState = EDepthStencilState::OccludedOnce;
+	OccludedPipelineState.BlendState = EBlendState::AlphaBlend;
+
 	return true;
 }
 
@@ -53,14 +58,23 @@ void FBoneRenderer::OnRender(const FSkeletalPose& Pose, int32 SelectedBoneIndex,
 		return;
 	}
 
-	RenderCommand::BindPipelineState(PipelineState);
-
 	TArray<float> JointRadii = GetJointRadii(Pose);
 
 	RenderCommand::BindConstantBuffer(0, ConstantBuffer.get(), EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
 
-	// Joint
+	// 가려진 부분부터
+	RenderCommand::BindPipelineState(OccludedPipelineState);
+	DrawBones(Pose, JointRadii, SelectedBoneIndex, ViewProjection, CameraLocation, OccludedAlpha);
+
+	// 가려지지 않은 부분
+	RenderCommand::BindPipelineState(PipelineState);
+	DrawBones(Pose, JointRadii, SelectedBoneIndex, ViewProjection, CameraLocation, 1.0f);
+}
+
+void FBoneRenderer::DrawBones(const FSkeletalPose& Pose, const TArray<float>& JointRadii, int32 SelectedBoneIndex, const FMatrix& ViewProjection, const FVector& CameraLocation, float Alpha)
+{
 	RenderCommand::BindMesh(BoneSphereMesh);
+
 	for (int32 Index = 0; Index < Pose.LocalPose.Num(); ++Index)
 	{
 		const FVector Location = Pose.ComponentSpacePose[Index].GetOrigin();
@@ -76,7 +90,7 @@ void FBoneRenderer::OnRender(const FSkeletalPose& Pose, int32 SelectedBoneIndex,
 		const FConstantData Data{
 			.World = World,
 			.ViewProjection = ViewProjection,
-			.Color = GetDisplayColor(Index == SelectedBoneIndex),
+			.Color = GetDisplayColor(Index == SelectedBoneIndex, Alpha),
 			.CameraLocation = CameraLocation,
 		};
 
@@ -133,7 +147,7 @@ void FBoneRenderer::OnRender(const FSkeletalPose& Pose, int32 SelectedBoneIndex,
 		const FConstantData Data{
 			.World = World,
 			.ViewProjection = ViewProjection,
-			.Color = GetDisplayColor(ParentIndex == SelectedBoneIndex),
+			.Color = GetDisplayColor(ParentIndex == SelectedBoneIndex, Alpha),
 			.CameraLocation = CameraLocation,
 		};
 

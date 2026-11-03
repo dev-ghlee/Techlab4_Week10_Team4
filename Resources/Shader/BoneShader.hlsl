@@ -41,5 +41,5 @@ float4 mainPS(PixelInput Input) : SV_TARGET
 {
     float3 N = normalize(Input.Normal);
     float3 V = normalize(CameraLocation - Input.WorldPosition);
-    return float4(Color.rgb * lerp(0.35f, 1.0f, saturate(dot(N, V))), 1.0f);
+    return float4(Color.rgb * lerp(0.35f, 1.0f, saturate(dot(N, V))), Color.a);
 }

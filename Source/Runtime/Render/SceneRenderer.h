@@ -23,6 +23,7 @@ struct FSceneOverlayCallbacks
 	std::function<void()> EditorLines;
 	std::function<void()> EditorGrid;
 	std::function<void()> EditorOutline;
+	std::function<void()> EditorBones;
 	std::function<void()> EditorGizmo;
 	std::function<void()> SIEOutline;
 	std::function<void()> SIEGizmo;

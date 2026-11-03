@@ -14,12 +14,13 @@ public:
 	bool Init(FRenderer* InRenderer);
 
 	void OnRender(const FSkeletalPose& Pose, int32 SelectedBoneIndex, const FMatrix& ViewProjection, const FVector& CameraLocation);
+	void DrawBones(const FSkeletalPose& Pose, const TArray<float>& JointRadii, int32 SelectedBoneIndex, const FMatrix& ViewProjection, const FVector& CameraLocation, float Alpha);
 
-private:
 	FRenderer* Renderer = nullptr;
 
 	FShaderProgram* Shader = nullptr;
 	FPipelineState PipelineState;
+	FPipelineState OccludedPipelineState;
 	UStaticMesh* BoneSphereMesh = nullptr;
 	UStaticMesh* BoneOctahedronMesh = nullptr;
 	TUniquePtr<FConstantBuffer> ConstantBuffer;
