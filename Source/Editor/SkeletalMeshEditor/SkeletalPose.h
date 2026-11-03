@@ -14,6 +14,8 @@ struct FSkeletalPose
 		{
 			LocalPose = Skeleton->RawRefBonePose;
 		}
+		// 같은 크기의 다른 Skeleton이나 기준 자세로 돌아가도 전체를 다시 계산한다.
+		CachedLocalPose.Reset();
 	}
 
 	void UpdateComponentSpace()
@@ -23,17 +25,25 @@ struct FSkeletalPose
 			return;
 		}
 
-		if (ComponentSpacePose.Num() != LocalPose.Num())
+		const bool bRebuildAll = ComponentSpacePose.Num() != LocalPose.Num()
+			|| CachedLocalPose.Num() != LocalPose.Num();
+		if (bRebuildAll)
 		{
-			ComponentSpacePose.Reset();
 			ComponentSpacePose.SetNum(LocalPose.Num());
+			CachedLocalPose.SetNum(LocalPose.Num());
+			DirtyComponentSpace.SetNum(LocalPose.Num());
 		}
 
 		for (int32 BoneIndex = 0; BoneIndex < LocalPose.Num(); ++BoneIndex)
 		{
 			const int32 ParentIndex = Skeleton->RawRefBoneInfo[BoneIndex].ParentIndex;
+			DirtyComponentSpace[BoneIndex] = bRebuildAll
+				|| LocalPose[BoneIndex] != CachedLocalPose[BoneIndex]
+				|| (ParentIndex >= 0 && DirtyComponentSpace[ParentIndex]);
+			if (!DirtyComponentSpace[BoneIndex]) continue;
 			ComponentSpacePose[BoneIndex] = LocalPose[BoneIndex].GetLocalMatrix() *
 				(ParentIndex >= 0 ? ComponentSpacePose[ParentIndex] : FMatrix::Identity);
+			CachedLocalPose[BoneIndex] = LocalPose[BoneIndex];
 		}
 	}
 
@@ -46,6 +56,10 @@ struct FSkeletalPose
 		}
 		return Rotation;
 	}
+
+private:
+	TArray<FTransform> CachedLocalPose;
+	TArray<uint8> DirtyComponentSpace;
 };
 
 inline TArray<float> GetJointRadii(const FSkeletalPose& Pose)

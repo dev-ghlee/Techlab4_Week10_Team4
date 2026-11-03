@@ -35,12 +35,12 @@ bool USkeletalMeshComponent::UpdateSkinnedMesh()
 	if (!bPoseDirty && MeshObject) return true;
 	if (!MeshObject)
 		MeshObject = MakeUnique<FSkeletalMeshObject>(SkeletalMesh->GetMeshData(), SkeletalMesh->GetIndexBuffer());
-	if (!MeshObject->UpdateDynamicData(GetBoneComponentMatrices())) return false;
+	if (!MeshObject->UpdateDynamicData(GetBoneComponentMatrices(), &GetDirtySkinningBones())) return false;
 	// 본만 움직여도 CPU 계산 결과의 Bounds와 그림자 캐시를 갱신한다.
 	OnTransformDirty();
 	if (!MeshObject->UploadSkinnedVertices()) return false;
 	// 업로드까지 성공한 자세만 반영 완료로 처리한다.
-	bPoseDirty = false;
+	ClearPoseDirty();
 	return true;
 }
 

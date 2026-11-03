@@ -33,7 +33,10 @@ protected:
 	// 파생 컴포넌트가 가진 공유 리소스를 읽어 본 계산에 사용한다.
 	virtual const FSkeletalMeshData* GetSkinnedMeshData() const = 0;
 	void InitializePose();
-	void MarkPoseDirty();
+	// INDEX_NONE은 전체 초기화, 특정 인덱스는 해당 본과 자손만 갱신한다.
+	void MarkPoseDirty(int32 BoneIndex = INDEX_NONE);
+	const TArray<uint8>& GetDirtySkinningBones() const { RefreshBoneTransforms(); return DirtySkinningBones; }
+	void ClearPoseDirty();
 
 	// CPU 스키닝 측이 새 자세를 반영한 뒤 해제한다. 계층 캐시 갱신과는 구분한다.
 	bool bPoseDirty = false;
@@ -43,5 +46,8 @@ private:
 	TArray<FTransform> BoneLocalTransforms;
 	// 조회 시 필요한 경우에만 계층 행렬을 갱신한다.
 	mutable TArray<FMatrix> BoneComponentMatrices;
+	mutable TArray<uint8> DirtyBoneTransforms;
+	// 행렬 조회로 캐시를 갱신해도 GPU 업로드가 끝날 때까지 변경 범위를 유지한다.
+	mutable TArray<uint8> DirtySkinningBones;
 	mutable bool bBoneTransformsDirty = false;
 };

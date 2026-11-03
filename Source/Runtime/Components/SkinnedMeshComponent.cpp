@@ -50,8 +50,9 @@ const TArray<FMatrix>& USkinnedMeshComponent::GetBoneComponentMatrices() const
 void USkinnedMeshComponent::SetBoneLocalTransform(int32 BoneIndex, const FTransform& NewTransform)
 {
 	if (!BoneLocalTransforms.IsValidIndex(BoneIndex)) return;
+	if (BoneLocalTransforms[BoneIndex] == NewTransform) return;
 	BoneLocalTransforms[BoneIndex] = NewTransform;
-	MarkPoseDirty();
+	MarkPoseDirty(BoneIndex);
 }
 
 // Gizmo에서 받은 월드 행렬을 부모 본 기준의 위치·회전·크기로 바꿔 저장한다.
@@ -93,8 +94,7 @@ void USkinnedMeshComponent::SetBoneWorldTransform(int32 BoneIndex, const FMatrix
 		LocalTransform.Rotation.Yaw = FMath::RadiansToDegrees(std::atan2(-Rotation[1][0], Rotation[1][1]));
 		LocalTransform.Rotation.Roll = 0.0f;
 	}
-	BoneLocalTransforms[BoneIndex] = LocalTransform;
-	MarkPoseDirty();
+	SetBoneLocalTransform(BoneIndex, LocalTransform);
 }
 
 // 리소스의 기준 자세를 복사해 이 컴포넌트가 편집할 본 자세를 준비한다.
@@ -117,10 +117,25 @@ void USkinnedMeshComponent::ResetToReferencePose()
 }
 
 // 본 행렬 갱신과 정점 스키닝은 각각 필요할 때 수행하므로 두 상태를 함께 표시한다.
-void USkinnedMeshComponent::MarkPoseDirty()
+void USkinnedMeshComponent::MarkPoseDirty(int32 BoneIndex)
 {
+	if (BoneIndex == INDEX_NONE)
+	{
+		DirtyBoneTransforms.Init(1, BoneLocalTransforms.Num());
+		DirtySkinningBones.Init(1, BoneLocalTransforms.Num());
+	}
+	else
+	{
+		DirtyBoneTransforms[BoneIndex] = 1;
+	}
 	bBoneTransformsDirty = true;
 	bPoseDirty = true;
+}
+
+void USkinnedMeshComponent::ClearPoseDirty()
+{
+	std::fill(DirtySkinningBones.begin(), DirtySkinningBones.end(), 0);
+	bPoseDirty = false;
 }
 
 // 부모부터 변환을 누적해, 메시를 기준으로 한 각 본의 현재 행렬을 구한다.
@@ -131,12 +146,18 @@ void USkinnedMeshComponent::RefreshBoneTransforms() const
 	// 리소스의 부모 우선 순서를 이용한다. 부모 수정 시 자식도 함께 갱신된다.
 	for (int32 BoneIndex = 0; BoneIndex < BoneLocalTransforms.Num(); ++BoneIndex)
 	{
-		const FMatrix Local = BoneLocalTransforms[BoneIndex].GetLocalMatrix();
 		const int32 ParentIndex = Data->RefSkeleton.RawRefBoneInfo[BoneIndex].ParentIndex;
+		// 부모가 바뀌면 자식의 Local이 같아도 Component 행렬은 달라진다.
+		if (ParentIndex != INDEX_NONE && DirtyBoneTransforms[ParentIndex])
+			DirtyBoneTransforms[BoneIndex] = 1;
+		if (!DirtyBoneTransforms[BoneIndex]) continue;
+		const FMatrix Local = BoneLocalTransforms[BoneIndex].GetLocalMatrix();
 		// 루트는 Local 그대로, 자식은 Local * 부모 Component 행렬로 누적한다.
 		BoneComponentMatrices[BoneIndex] = ParentIndex == INDEX_NONE
 			? Local : Local * BoneComponentMatrices[ParentIndex];
+		DirtySkinningBones[BoneIndex] = 1;
 	}
+	std::fill(DirtyBoneTransforms.begin(), DirtyBoneTransforms.end(), 0);
 	// 계층 조회가 끝나도 CPU 스키닝에 전달할 bPoseDirty는 유지한다.
 	bBoneTransformsDirty = false;
 }
