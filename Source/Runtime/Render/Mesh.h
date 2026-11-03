@@ -4,6 +4,7 @@
 #include "Render/Buffer.h"
 #include "Render/StaticMeshData.h"
 #include "Render/MeshRenderData.h"
+#include "Render/MeshGeometry.h"
 #include <unordered_map>
 #include <vector>
 #include "Mesh.generated.h"
@@ -59,6 +60,11 @@ public:
     FIndexBuffer* GetIndexBuffer(uint32 LODIndex) const
     {
         return LODIndex == 0 ? IndexBuffer.get() : AdditionalLODs[LODIndex - 1].IndexBuffer.get();
+    }
+
+    FMeshGeometry GetGeometry(uint32 LODIndex = 0) const
+    {
+        return { GetVertexBuffer(LODIndex), GetIndexBuffer(LODIndex), SortID };
     }
 
     void RebuildRenderData();

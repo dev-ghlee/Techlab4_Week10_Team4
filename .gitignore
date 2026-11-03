@@ -458,3 +458,15 @@ AGENTS.md
 /Docs/Runtime/ParticleSystem.md
 Tools/SnowMountain/build_snow_mountain.py
 /Tools
+
+# FBX SDK: 필요한 정적 MD 라이브러리 6개만 공유한다.
+!/Source/ThirdParty/FBXSDK/lib/x64/debug/
+/Source/ThirdParty/FBXSDK/lib/x64/debug/*
+!/Source/ThirdParty/FBXSDK/lib/x64/debug/libfbxsdk-md.lib
+!/Source/ThirdParty/FBXSDK/lib/x64/debug/libxml2-md.lib
+!/Source/ThirdParty/FBXSDK/lib/x64/debug/zlib-md.lib
+!/Source/ThirdParty/FBXSDK/lib/x64/release/
+/Source/ThirdParty/FBXSDK/lib/x64/release/*
+!/Source/ThirdParty/FBXSDK/lib/x64/release/libfbxsdk-md.lib
+!/Source/ThirdParty/FBXSDK/lib/x64/release/libxml2-md.lib
+!/Source/ThirdParty/FBXSDK/lib/x64/release/zlib-md.lib

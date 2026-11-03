@@ -1,24 +1,13 @@
 ﻿#pragma once
 
 #include "Vertex.h"
+#include "MeshDataTypes.h"
 #include "Math/BVH.h"
 #include "Math/Box.h"
 
-// Cooked obj Data의 Section 구조체
-struct FStaticMeshSection
-{
-	uint32 StartIndex = 0;
-	uint32 IndexCount = 0;
-	uint32 MaterialSlotIndex = 0;
-};
-
-struct FStaticMaterialSlot
-{
-	FString Name;
-	FVector4 BaseColor = FVector4(1, 1, 1, 1);
-	FString DiffuseTexturePath;
-	FString NormalTexturePath{};
-};
+// 기존 OBJ/StaticMesh API와 바이너리 필드 구성을 유지한다.
+using FStaticMeshSection = FMeshSection;
+using FStaticMaterialSlot = FMeshMaterialSlot;
 
 struct FLODSourceVertex
 {

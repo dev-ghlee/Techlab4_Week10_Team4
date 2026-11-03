@@ -2,6 +2,7 @@
 #include "AssetManager.h"
 #include "Render/Buffer.h"
 #include "Render/Material.h"
+#include "Render/SkeletalMesh.h"
 
 #include "Render/Vertex.h"
 #include "Render/Texture2D.h"
@@ -10,6 +11,7 @@
 #include "Render/RenderResourceManager.h"
 
 #include "Asset/ObjImporter/ObjImporter.h"
+#include "Asset/FbxImporter/FbxImporter.h"
 
 #include "Render/GeometryGenerator.h"
 #include "UObject/UObjectGlobals.h"
@@ -18,6 +20,8 @@
 
 #include "Render/ImageLoader.h"
 #include <cctype>
+#include <limits>
+#include <utility>
 
 
 namespace
@@ -129,6 +133,136 @@ UAssetManager& UAssetManager::Get()
 	return *Instance;
 }
 
+TUniquePtr<UMaterial> UAssetManager::CreateSkeletalMaterial(const FMeshMaterialSlot& Slot, FString& OutError)
+{
+	OutError.clear();
+
+	// 기존 기본 재질의 셰이더, 렌더 상태, 기본 텍스처를 재사용한다.
+	UMaterial* DefaultMaterial = GetAssetByPath<UMaterial>("DefaultMaterial");
+	if (!DefaultMaterial || !DefaultMaterial->Shader
+		|| DefaultMaterial->Textures.Num() < 2)
+	{
+		OutError = "Default material is not ready.";
+		return nullptr;
+	}
+
+	// 생성 도중 실패하면 임시 재질을 자동으로 삭제한다.
+	TUniquePtr<UMaterial> Material{ UMaterial::CreateInstance(DefaultMaterial) };
+	if (!Material || !Material->ParamBuffer
+		|| !Material->ParamBuffer->GetBuffer())
+	{
+		OutError = "Failed to create skeletal mesh material.";
+		return nullptr;
+	}
+
+	Material->BaseColor = Slot.BaseColor;
+
+	// 기존 셰이더의 슬롯 순서: Diffuse = 0, Normal = 1.
+	const FString* TexturePaths[2] = { &Slot.DiffuseTexturePath, &Slot.NormalTexturePath };
+	for (uint32 TextureIndex = 0; TextureIndex < 2; ++TextureIndex)
+	{
+		const FString& TexturePath = *TexturePaths[TextureIndex];
+
+		// 경로가 없으면 복제된 기본 텍스처를 그대로 유지한다.
+		if (!TexturePath.empty())
+		{
+			UTexture2D* Texture = LoadTexture(TexturePath);
+			if (!Texture)
+			{
+				OutError = "Failed to load texture: " + TexturePath;
+				return nullptr;
+			}
+
+			Material->Textures[TextureIndex] = Texture;
+		}
+
+		// 기본 텍스처를 포함해 실제 셰이더 바인딩이 가능한지 확인한다.
+		UTexture2D* Texture = Material->Textures[TextureIndex];
+		if (!Texture || !Texture->GetResource()
+			|| !Texture->GetResource()->GetSRV())
+		{
+			OutError = "Material texture has no valid shader resource view.";
+			return nullptr;
+		}
+	}
+
+	return Material;
+}
+
+USkeletalMesh* UAssetManager::CreateSkeletalMesh(FSkeletalMeshData&& MeshData, FString& OutError)
+{
+	OutError.clear();
+
+	// Importer가 최종 검증한 데이터를 전달받는다.
+	// 비어 있는 인덱스 배열로 GPU 버퍼를 생성하지 않는다.
+	if (MeshData.Indices.IsEmpty())
+	{
+		OutError = "Skeletal mesh has no indices.";
+		return nullptr;
+	}
+
+	// 기존 버퍼 생성 함수의 바이트 크기 범위를 넘지 않도록 확인한다.
+	const uint64 IndexBufferSize = static_cast<uint64>(MeshData.Indices.Num()) * sizeof(uint32);
+	if (IndexBufferSize > std::numeric_limits<uint32>::max())
+	{
+		OutError = "Skeletal mesh index buffer is too large.";
+		return nullptr;
+	}
+
+	// 기존 생성 함수가 인덱스 값에 따라 16비트 또는 32비트 형식을 선택한다.
+	const uint32 IndexCount = static_cast<uint32>(MeshData.Indices.Num());
+	TUniquePtr<FIndexBuffer> IndexBuffer = RenderCommand::CreateStaticIndexBuffer(MeshData.Indices.GetData(), IndexCount);
+	if (!IndexBuffer || !IndexBuffer->GetBuffer())
+	{
+		OutError = "Failed to create skeletal mesh index buffer.";
+		return nullptr;
+	}
+
+	TArray<FSkeletalMaterial> Materials;
+
+	// 초기화가 성공하기 전까지 새 재질의 임시 소유권을 유지한다.
+	TArray<TUniquePtr<UMaterial>> PendingMaterials;
+	for (const FStaticMaterialSlot& Slot : MeshData.MaterialSlots)
+	{
+		TUniquePtr<UMaterial> Material = CreateSkeletalMaterial(Slot, OutError);
+		if (!Material)
+		{
+			return nullptr;
+		}
+
+		// 원본 슬롯 순서를 유지해 Section.MaterialIndex와 대응시킨다.
+		FSkeletalMaterial SkeletalMaterial;
+		SkeletalMaterial.MaterialInterface = Material.get();
+		SkeletalMaterial.MaterialSlotName = FName(Slot.Name);
+
+		PendingMaterials.Add(std::move(Material));
+		Materials.Add(std::move(SkeletalMaterial));
+	}
+
+	// 실패 시 객체가 정리되도록 초기화 중에는 임시 소유한다.
+	TUniquePtr<USkeletalMesh> SkeletalMesh{ NewObject<USkeletalMesh>() };
+	if (!SkeletalMesh)
+	{
+		OutError = "Failed to create skeletal mesh object.";
+		return nullptr;
+	}
+
+	if (!SkeletalMesh->Initialize(std::move(MeshData), std::move(Materials), std::move(IndexBuffer), OutError))
+	{
+		return nullptr;
+	}
+
+	// 성공한 재질은 현재 프로젝트의 UObject 수명 관리에 맡긴다.
+	// release()는 삭제가 아니라 임시 소유권을 해제한다.
+	for (TUniquePtr<UMaterial>& Material : PendingMaterials)
+	{
+		Material.release();
+	}
+
+	// 호출자가 AssetManager에 등록할 수 있도록 완성된 객체를 반환한다.
+	return SkeletalMesh.release();
+}
+
 void UAssetManager::Init(const FAssetLoadProgress& OnProgress)
 {
 	FGeometryGenerator::CreateDefaultMeshDatas();
@@ -189,6 +323,14 @@ void UAssetManager::LoadAsset(const FString& Key, const FString& Path) {
 	}
 	if (Extension == ".obj") {
 		LoadObjStaticMesh(Path);
+	}
+	if (Extension == ".fbx")
+	{
+		FString Error;
+		if (!LoadFbxSkeletalMesh(Key, Path, Error))
+		{
+			HTR_LOG(Error, "Failed to load FBX '{}': {}", Path, Error);
+		}
 	}
 }
 
@@ -448,6 +590,45 @@ UStaticMesh* UAssetManager::LoadObjStaticMesh(const FString& Path)
 
 	Get().RegisterAsset(Key, Mesh);
 	return Mesh;
+}
+
+USkeletalMesh* UAssetManager::LoadFbxSkeletalMesh(const FString& Key, const FString& Path, FString& OutError)
+{
+	OutError.clear();
+
+	// 같은 키로 등록된 메시가 있으면 임포트와 GPU 자원 생성을 생략한다.
+	URenderAsset** CachedAsset = AssetMap.Find(Key);
+	if (CachedAsset && *CachedAsset)
+	{
+		USkeletalMesh* CachedMesh = Cast<USkeletalMesh>(*CachedAsset);
+		if (!CachedMesh)
+		{
+			// 다른 타입의 에셋을 같은 키로 덮어쓰지 않는다.
+			OutError = "Asset key is already used by another asset type: " + Key;
+		}
+
+		return CachedMesh;
+	}
+
+	// SDK 객체를 포함하지 않는 엔진 원본 데이터를 받는다.
+	FSkeletalMeshData MeshData;
+	if (!FFbxImporter::LoadScene(Path, MeshData, OutError))
+	{
+		return nullptr;
+	}
+
+	// 현재 객체의 private 생성 함수를 호출한다.
+	USkeletalMesh* SkeletalMesh = CreateSkeletalMesh(std::move(MeshData), OutError);
+	if (!SkeletalMesh)
+	{
+		return nullptr;
+	}
+
+	// 완성된 리소스만 등록한다. 실패 결과는 캐시에 남기지 않는다.
+	RegisterAsset(Key, SkeletalMesh);
+	AssetPathMap.Add(Key, Path);
+
+	return SkeletalMesh;
 }
 
 bool UAssetManager::ReorientStaticMesh(UStaticMesh& Mesh, const std::function<FVector(const FVector&)>& Rotate)

@@ -16,6 +16,8 @@ struct FRenderPacket
 	const FPrimitiveSceneProxy* Proxy = nullptr;
 	const FMatrix* Model = nullptr;
 	UStaticMesh* Mesh = nullptr;
+	// CPU 스키닝 결과는 Mesh를 지정하지 않고 전용 VB/IB를 직접 전달한다.
+	FMeshGeometry Geometry;
 	UMaterial* Material = nullptr;
 	const void* MaterialParamData = nullptr;
 	float CameraToParticleDistance = 0.0f;
@@ -25,6 +27,11 @@ struct FRenderPacket
 	uint32 Slot = InvalidObjectSlot;
 	uint8 LODIndex = 0;
 	bool bOccludedByGpu = false;
+
+	FMeshGeometry GetGeometry() const
+	{
+		return Mesh ? Mesh->GetGeometry(LODIndex) : Geometry;
+	}
 };
 
 struct FViewContext
@@ -97,7 +104,7 @@ class FRenderQueue : public TArray<FRenderPacket>
 	uint32 FirstTranslucentIndex = 0;
 
 	// 패킷 정렬 키 생성
-	static uint64 MakeSortKey(const FRenderPacket& Packet)
+	static uint64 MakeSortKey(const FRenderPacket& Packet, const FMeshGeometry& Geometry)
 	{
 		if (Packet.Material->PSOType != EPSOType::StaticMesh_Opaque)
 		{
@@ -106,7 +113,7 @@ class FRenderQueue : public TArray<FRenderPacket>
 		}
 
 		return (static_cast<uint64>(Packet.Material->SortID) << 47)
-			| (static_cast<uint64>(Packet.Mesh->SortID) << 31)
+			| (static_cast<uint64>(Geometry.SortID) << 31)
 			| (static_cast<uint64>(Packet.LODIndex & 0x3) << 29);
 	}
 
@@ -161,8 +168,10 @@ public:
 		for (int32 Index = 0; Index < TotalPackets; ++Index)
 		{
 			const FRenderPacket& Packet = (*this)[Index];
-			if (!Packet.Mesh || !Packet.Material) continue;
-			SortItems.Add({ MakeSortKey(Packet), Index });
+			if (!Packet.Material) continue;
+			const FMeshGeometry Geometry = Packet.GetGeometry();
+			if (!Geometry.IsValid()) continue;
+			SortItems.Add({ MakeSortKey(Packet, Geometry), Index });
 		}
 
 		std::sort(SortItems.begin(), SortItems.end(), [](const FSortItem& A, const FSortItem& B)

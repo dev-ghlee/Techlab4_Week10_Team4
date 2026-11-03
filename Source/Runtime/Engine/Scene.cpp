@@ -7,7 +7,8 @@ void FScene::AddPrimitive(UPrimitiveComponent* Component)
 {
 	if (!Component || Component->SceneProxy) return;
 
-	FPrimitiveSceneProxy* Proxy = new FPrimitiveSceneProxy(Component);
+	FPrimitiveSceneProxy* Proxy = Component->CreateSceneProxy();
+	if (!Proxy) return;
 	Proxy->Scene = this;
 	Proxy->PackedIndex = PrimitiveSceneProxies.Num();
 	Component->SceneProxy = Proxy;
@@ -204,6 +205,12 @@ const FSkyLightEnvironment* FScene::FindSkyLightEnvironment(const FString& Sourc
 }
 
 
+
+void FScene::UpdateDynamicData()
+{
+	for (FPrimitiveSceneProxy* Proxy : PrimitiveSceneProxies)
+		Proxy->UpdateDynamicData();
+}
 
 void FScene::UpdateAllTransforms()
 {

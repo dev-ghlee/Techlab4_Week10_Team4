@@ -843,6 +843,10 @@ void FSceneRenderer::RenderTranslucent(FRenderer* Renderer, FConstantBuffer* Fog
 void FSceneRenderer::GatherRenderPackets(FScene& Scene, FSceneRenderData& Data,
 	const FViewContext& View, const FFrustumPlanes* Frustum, FRenderer* Renderer) //여기서 꼭 renderer를 매개변수로 받아야 할까?
 {
+	// 화면 밖의 메시도 갱신해야 본 편집으로 커진 Bounds가 컬링을 통과할 수 있다.
+	// D3D 버퍼 업로드는 병렬 Gather 작업을 시작하기 전에 끝낸다.
+	Scene.UpdateDynamicData();
+	Scene.UpdateAllTransforms();
 	Data.ResetFrame();
 	FRenderQueue& RenderQueue = Data.RenderQueue;
 	FRenderStats& RenderStats = Data.RenderStats;
@@ -1054,7 +1058,15 @@ void FSceneRenderer::GatherRenderPackets(FScene& Scene, FSceneRenderData& Data,
 				}
 				else
 				{
-					Primitive->SubmitToRenderQueue(RenderQueue, View);
+					Proxy->GatherMeshElements(RenderQueue, View);
+				}
+
+				// 동적 메시도 Section 단위 삼각형 수를 기존 렌더 통계에 포함한다.
+				if (Proxy->GetRenderState() && FirstNew < static_cast<uint32>(RenderQueue.Num()))
+				{
+					++RenderStats.LODCounts[0];
+					for (uint32 p = FirstNew; p < static_cast<uint32>(RenderQueue.Num()); ++p)
+						RenderStats.LODTriangles[0] += RenderQueue[p].IndexCount / 3;
 				}
 
 				// continue 없이 항상 여기까지 와서 새 패킷에 여유 칸을 배정한다.
@@ -1063,7 +1075,7 @@ void FSceneRenderer::GatherRenderPackets(FScene& Scene, FSceneRenderData& Data,
 					if (!bPrepareObjectSlots || NextExtraSlot >= MaxSlots) break;
 					FRenderPacket& Packet = RenderQueue[p];
 					const FMatrix& Model = Packet.Proxy ? Packet.Proxy->GetLocalToWorld() : Packet.Model ? *Packet.Model : FMatrix::Identity;
-					Data.ObjectConstants[NextExtraSlot] = MakePerObjectConstants(Model);
+					Data.ObjectConstants[NextExtraSlot] = MakePerObjectConstants(Model, !Packet.Proxy || Packet.Proxy->bReceiveShadow);
 					Packet.Slot = NextExtraSlot++;
 				}
 			}
