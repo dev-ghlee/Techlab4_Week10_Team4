@@ -14,14 +14,10 @@ public:
 	USkeletalMesh() = default;
 	~USkeletalMesh() override = default;
 
-	// 등록 전에 한 번 호출한다. 함수 본문은 리소스 생성 단계에서 구현한다.
+	// 등록 전에 한 번 호출한다.
 	// 데이터, 재질, 버퍼의 대응을 확인한 뒤 내부로 이동한다.
 	// 실패하거나 이미 초기화된 경우 false와 오류를 반환한다.
-	bool Initialize(
-		FSkeletalMeshData&& InMeshData,
-		TArray<FSkeletalMaterial>&& InMaterials,
-		TUniquePtr<FIndexBuffer> InIndexBuffer,
-		FString& OutError);
+	bool Initialize(FSkeletalMeshData&& InMeshData, TArray<FSkeletalMaterial>&& InMaterials, TUniquePtr<FIndexBuffer> InIndexBuffer, FString& OutError);
 
 	// B가 원본 정점, Weight, 역바인드 등을 읽는 인터페이스.
 	const FSkeletalMeshData& GetMeshData() const
@@ -35,7 +31,7 @@ public:
 		return MeshData.RefSkeleton;
 	}
 
-	// 슬롯의 실제 재질 반환. 없으면 기본 재질을 반환하도록 구현한다.
+	// 슬롯의 실제 재질을 반환한다. 없으면 기본 재질을 반환한다.
 	UMaterial* GetMaterial(uint32 SlotIndex) const;
 
 	// 렌더링에 사용하는 공유 인덱스 버퍼.

@@ -16,7 +16,11 @@ enum class EAssetType
 };
 
 class UStaticMesh;
+class USkeletalMesh;
+class UMaterial;
 class USoundWave;
+struct FStaticMaterialSlot;
+struct FSkeletalMeshData;
 
 namespace fs = std::filesystem;
 
@@ -78,6 +82,12 @@ public:
 	static void ForEachObjStaticMesh(const std::function<void(const FString& Key, UStaticMesh& Mesh)>& Func);
 
 private:
+	// 슬롯의 색상과 텍스처 정보로 실제 재질을 생성한다.
+	TUniquePtr<UMaterial> CreateSkeletalMaterial(const FStaticMaterialSlot& Slot, FString& OutError);
+
+	// 검증된 원본 데이터로 공유 메시 리소스를 생성한다.
+	USkeletalMesh* CreateSkeletalMesh(FSkeletalMeshData&& MeshData, FString& OutError);
+
 	TMap<FString, FString> AssetPathMap;
 	TMap<FString, URenderAsset*> AssetMap;
 	TMap<FString, USoundWave*> SoundMap;
