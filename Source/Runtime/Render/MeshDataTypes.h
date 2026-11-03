@@ -4,7 +4,7 @@
 #include "Core/Types.h"
 #include "Math/Vector4.h"
 
-// StaticMesh와 SkeletalMesh가 공유하는 삼각형 인덱스 범위.
+// StaticMesh의 삼각형 인덱스 범위. SkeletalMesh는 FSkelMeshRenderSection을 사용한다.
 struct FMeshSection
 {
 	uint32 StartIndex = 0;

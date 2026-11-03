@@ -5,15 +5,17 @@ int32 USkinnedMeshComponent::FindBoneIndex(const FString& BoneName) const
 {
 	const FSkeletalMeshData* Data = GetSkinnedMeshData();
 	if (!Data) return INDEX_NONE;
-	for (int32 BoneIndex = 0; BoneIndex < Data->Bones.Num(); ++BoneIndex)
-		if (Data->Bones[BoneIndex].Name == BoneName) return BoneIndex;
+	const FName Name(BoneName);
+	const auto& BoneInfos = Data->RefSkeleton.RawRefBoneInfo;
+	for (int32 BoneIndex = 0; BoneIndex < BoneInfos.Num(); ++BoneIndex)
+		if (BoneInfos[BoneIndex].Name == Name) return BoneIndex;
 	return INDEX_NONE;
 }
 
 int32 USkinnedMeshComponent::GetParentBoneIndex(int32 BoneIndex) const
 {
 	return BoneLocalTransforms.IsValidIndex(BoneIndex)
-		? GetSkinnedMeshData()->Bones[BoneIndex].ParentIndex : INDEX_NONE;
+		? GetSkinnedMeshData()->RefSkeleton.RawRefBoneInfo[BoneIndex].ParentIndex : INDEX_NONE;
 }
 
 FTransform USkinnedMeshComponent::GetBoneLocalTransform(int32 BoneIndex) const
@@ -59,7 +61,7 @@ void USkinnedMeshComponent::SetBoneWorldTransform(int32 BoneIndex, const FMatrix
 
 	// 행벡터 규약: World -> Component -> 부모 본 기준 Local 순서로 되돌린다.
 	FMatrix LocalMatrix = NewWorldMatrix * GetWorldMatrix().Inverse();
-	const int32 ParentIndex = GetSkinnedMeshData()->Bones[BoneIndex].ParentIndex;
+	const int32 ParentIndex = GetSkinnedMeshData()->RefSkeleton.RawRefBoneInfo[BoneIndex].ParentIndex;
 	if (ParentIndex != INDEX_NONE)
 		LocalMatrix *= BoneComponentMatrices[ParentIndex].Inverse();
 
@@ -100,10 +102,9 @@ void USkinnedMeshComponent::InitializePose()
 	BoneComponentMatrices.Reset();
 	if (const FSkeletalMeshData* Data = GetSkinnedMeshData())
 	{
-		BoneLocalTransforms.Reserve(Data->Bones.Num());
-		for (const FSkeletalBone& Bone : Data->Bones)
-			BoneLocalTransforms.Add(Bone.ReferenceLocalTransform);
-		BoneComponentMatrices.SetNum(Data->Bones.Num());
+		// 루트의 바인드 스케일까지 포함한 기준 로컬 포즈를 그대로 복사한다.
+		BoneLocalTransforms = Data->RefSkeleton.RawRefBonePose;
+		BoneComponentMatrices.SetNum(BoneLocalTransforms.Num());
 	}
 	MarkPoseDirty();
 }
@@ -127,7 +128,7 @@ void USkinnedMeshComponent::RefreshBoneTransforms() const
 	for (int32 BoneIndex = 0; BoneIndex < BoneLocalTransforms.Num(); ++BoneIndex)
 	{
 		const FMatrix Local = BoneLocalTransforms[BoneIndex].GetLocalMatrix();
-		const int32 ParentIndex = Data->Bones[BoneIndex].ParentIndex;
+		const int32 ParentIndex = Data->RefSkeleton.RawRefBoneInfo[BoneIndex].ParentIndex;
 		// 루트는 Local 그대로, 자식은 Local * 부모 Component 행렬로 누적한다.
 		BoneComponentMatrices[BoneIndex] = ParentIndex == INDEX_NONE
 			? Local : Local * BoneComponentMatrices[ParentIndex];
