@@ -2,7 +2,7 @@
 
 #include "Archive.h"
 #include "StructuredArchiveFormatter.h"
-#include "StructuredArchiveSlotBase.h"
+#include "StructuredArchiveSlots.h"
 
 using FArchiveFormatterType = FStructuredArchiveFormatter;
 

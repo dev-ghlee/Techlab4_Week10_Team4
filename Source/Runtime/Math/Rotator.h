@@ -18,7 +18,7 @@ struct FRotator
 	FRotator(float P, float Y, float R);
 	FRotator(FVector V);
 
-	static FRotator Identitiy;
+	static FRotator Identity;
 
 	FQuat Quaternion() const;
 
@@ -43,6 +43,16 @@ struct FRotator
 	FRotator operator*(const float Scalar)
 	{
 		return FRotator(Pitch * Scalar, Yaw * Scalar, Roll * Scalar);
+	}
+
+	bool operator==(const FRotator& Other) const
+	{
+		return Pitch == Other.Pitch && Yaw == Other.Yaw && Roll == Other.Roll;
+	}
+
+	bool operator!=(const FRotator& Other) const
+	{
+		return !(*this == Other);
 	}
 };
 

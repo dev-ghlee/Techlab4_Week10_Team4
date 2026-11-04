@@ -466,6 +466,41 @@ TUniquePtr<FStaticMeshData> FGeometryGenerator::CreateSphere(float Radius, uint3
 	return SphereMeshData;
 }
 
+TUniquePtr<FStaticMeshData> FGeometryGenerator::CreateOctahedron(float Tail, float Head, float Waist, float Width, const FVector4& Color)
+{
+	TUniquePtr<FStaticMeshData> OctahedronMeshData = MakeUnique<FStaticMeshData>();
+
+	const FVector TailPosition{ Tail, 0.0f, 0.0f };
+	const FVector HeadPosition{ Head, 0.0f, 0.0f };
+	const FVector WaistPositions[4] = {
+		{ Waist, -Width, -Width },
+		{ Waist, -Width, Width },
+		{ Waist, Width, Width },
+		{ Waist, Width, -Width }
+	};
+
+	const auto AddFace = [&](const FVector& A, const FVector& B, const FVector& C)
+		{
+			for (const FVector& Position : { A, B, C })
+			{
+				OctahedronMeshData->Indices.Add(OctahedronMeshData->Vertices.Num());
+				OctahedronMeshData->Vertices.Add({ .Position = Position, .Color = Color });
+			}
+		};
+
+	for (int i = 0; i < 4; ++i)
+	{
+		const int Next = (i + 1) % 4;
+		AddFace(TailPosition, WaistPositions[i], WaistPositions[Next]);
+		AddFace(HeadPosition, WaistPositions[Next], WaistPositions[i]);
+	}
+
+	CalculateNormals(OctahedronMeshData->Vertices, OctahedronMeshData->Indices);
+	OctahedronMeshData->AABB = CalculateAABB(OctahedronMeshData->Vertices);
+
+	return OctahedronMeshData;
+}
+
 FStaticMeshData* FGeometryGenerator::GetMeshData(const FString& InName)
 {
 	TUniquePtr<FStaticMeshData>* MeshData = MeshDataMap.Find(InName);
@@ -487,4 +522,6 @@ void FGeometryGenerator::CreateDefaultMeshDatas()
 	MeshDataMap["Ring"] = CreateRing(1.0f, 0.03f, 32, 16, FVector4(1.0f, 0.0f, 0.0f, 1.0f));
 	MeshDataMap["ScaleBar"] = CreateScaleBar(0.1f, 1.0f, 0.4f, 20, FVector4(1.0f, 0.0f, 0.0f, 1.0f));
 	MeshDataMap["GizmoSphere"] = CreateSphere(0.2f, 100, 50, FVector4(1.0f, 1.0f, 1.0f, 1.0f));
+	MeshDataMap["BoneSphere"] = CreateSphere(1.0f, 16, 8, FVector4(0.3f, 0.31f, 0.41f, 1.0f));
+	MeshDataMap["BoneOctahedron"] = CreateOctahedron(0.0f, 1.0f, 0.1f, 0.1f, FVector4(0.3f, 0.31f, 0.41f, 1.0f));
 }

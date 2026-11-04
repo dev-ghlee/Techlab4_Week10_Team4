@@ -39,6 +39,7 @@
 #include "Editor/Outliner/OutlinerPanel.h"
 #include "Editor/HitoriEd/EditorFileUtils.h"
 #include "Editor/Viewports/EditorViewportClient.h"
+#include "Editor/SkeletalMeshEditor/SkeletalMeshEditorPanel.h"
 #include "UObject/UObjectIterator.h"
 
 #include "Core/EngineLog.h"
@@ -48,6 +49,7 @@
 #include <sol/sol.hpp>
 
 #include "Components/ShapeComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/DecalComponent.h"
 
 #include "Physics/Collision.h"
@@ -133,6 +135,9 @@ bool UEditorEngine::Init()
 
 	Gizmo = MakeUnique<FGizmo>();
 
+	BoneRenderer = MakeUnique<FBoneRenderer>();
+	BoneRenderer->Init(Renderer);
+
 	DetailsPanel = EditorUI->AddEditorPanel<FDetailsPanel>();
 	DetailsPanel->SetImGuiRenderer(ImGuiRenderer.get());
 	DetailsPanel->SetShadowPreviewQuery([this](const ULightComponent* Light, FTexture2DArray*& Atlas,
@@ -174,8 +179,12 @@ bool UEditorEngine::Init()
 	OutputLogPanel->SetEditorSettings(&SettingsPanel->GetMutableSettings());
 
 	UIEditorPanel = EditorUI->AddEditorPanel<FUIEditorPanel>();
+	SkeletalMeshEditorPanel = EditorUI->AddEditorPanel<FSkeletalMeshEditorPanel>();
+	SkeletalMeshEditorPanel->SetEditorSettings(&SettingsPanel->GetMutableSettings());
+
 	ContentDrawerPanel->SetCreateWidgetCallback([this](const FString& Path) { UIEditorPanel->NewAsset(Path); });
 	ContentDrawerPanel->SetOpenWidgetCallback([this](const FString& Path) { UIEditorPanel->OpenAsset(Path); });
+	ContentDrawerPanel->SetOpenSkeletalCallback([this](const FString& Path) { SkeletalMeshEditorPanel->OpenAsset(Path); });
 
 	Outline = MakeUnique<FOutline>();
 
@@ -207,7 +216,7 @@ bool UEditorEngine::Init()
 	OutlinerPanel->SetSelectionCallback(
 		[this](USceneComponent* Root)
 		{
-			Gizmo->SetTarget(Root, true);
+			SetSelectedComponent(Root);
 			DetailsPanel->SetTarget(Root ? Root->GetOwner() : nullptr);
 
 			UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Root);
@@ -222,22 +231,7 @@ bool UEditorEngine::Init()
 	DetailsPanel->SetSelectionCallback(
 		[this](UActorComponent* Component)
 		{
-			if (USceneComponent* SceneComponent = Cast<USceneComponent>(Component))
-			{
-				AActor* Owner = SceneComponent->GetOwner();
-				if (Owner && SceneComponent == Owner->GetRootComponent())
-				{
-					Gizmo->SetTarget(SceneComponent, true);
-				}
-				else
-				{
-					Gizmo->SetTarget(SceneComponent);
-				}
-			}
-			else
-			{
-				Gizmo->SetTarget(nullptr);
-			}
+			SetSelectedComponent(Cast<USceneComponent>(Component));
 		}
 	);
 
@@ -262,6 +256,7 @@ bool UEditorEngine::Init()
 	EditorControlsPanel->SetWorld(EditorWorld);
 	EditorControlsPanel->SetIsPlayingQuery([this]() { return IsPlaying(); });
 	EditorControlsPanel->SetGizmo(Gizmo.get());
+	EditorControlsPanel->SetGizmoInputBlockedQuery([this] { return SkeletalMeshEditorPanel->IsFocused(); });
 	EditorControlsPanel->SetViewportsPanel(ViewportsPanel);
 
 	SettingsPanel->SetWorld(EditorWorld);
@@ -394,6 +389,94 @@ void UEditorEngine::BeginFrame(const float DeltaTime)
 
 	if (!ImGui::GetIO().WantTextInput && FInputSystem::IsKeyPressed(EKeyCode::Delete))
 		DeleteActor(OutlinerPanel->GetSelectedActor());
+
+	HandleSkeletalMeshPreviewInput();
+}
+
+// F6: 모델 표시, F7: 본 회전, F9: 기준 자세 복구. 플레이 중에는 게임 입력을 건드리지 않는다.
+void UEditorEngine::HandleSkeletalMeshPreviewInput()
+{
+	if (PlayWorld || ImGui::GetIO().WantTextInput
+		|| ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopup)) return;
+	const bool bLoad = FInputSystem::IsKeyPressed(EKeyCode::F6);
+	const bool bRotate = FInputSystem::IsKeyPressed(EKeyCode::F7);
+	const bool bReset = FInputSystem::IsKeyPressed(EKeyCode::F9);
+	if (!bLoad && !bRotate && !bReset) return;
+
+	// 선택된 액터에서 매번 찾아 씬 변경이나 액터 삭제 후에도 포인터가 남지 않게 한다.
+	AActor* Actor = OutlinerPanel->GetSelectedActor();
+	USkeletalMeshComponent* Component = nullptr;
+	if (Actor)
+		for (UActorComponent* Candidate : Actor->GetComponents())
+			if ((Component = Cast<USkeletalMeshComponent>(Candidate))) break;
+
+	if (bLoad)
+	{
+		FString Error;
+		USkeletalMesh* Mesh = UAssetManager::Get().LoadFbxSkeletalMesh(
+			"Models/Rigged_Man/SKM_Manny_Simple.fbx", "Assets/Models/RiggedMan/rigged_man.fbx", Error);
+		if (!Mesh)
+		{
+			HTR_LOG(Error, "Rigged_Man preview: {}", Error);
+			return;
+		}
+		if (!Component)
+		{
+			const FName Name = MakeUniqueObjectName(EditorWorld->GetPersistentLevel(),
+				AActor::StaticClass(), "RiggedManPreview");
+			Actor = EditorWorld->SpawnActor<AActor>(Name);
+			Component = Cast<USkeletalMeshComponent>(Actor->AddComponent(
+				USkeletalMeshComponent::StaticClass(), "SkeletalMeshComponent"));
+		}
+		Component->SetSkeletalMesh(Mesh);
+		Component->ResetToReferencePose();
+		OutlinerPanel->SelectActor(Actor);
+
+		// 메시 크기에 맞춰 활성 뷰의 카메라와 클리핑 범위를 조정한다.
+		if (FEditorViewportClient* Client = ViewportsPanel->GetViewportClient(ViewportsPanel->GetActiveViewIndex()))
+		{
+			const FBox Bounds = Component->CalcLocalBounds().GetWorldAABB(Component->GetWorldMatrix());
+			Client->FocusBounds(Bounds);
+		}
+		HTR_LOG(Info, "Rigged_Man preview ready. F7: rotate bone, F9: reference pose.");
+		return;
+	}
+
+	if (!Component || !Component->GetSkeletalMesh()) return;
+	if (bReset)
+	{
+		Component->ResetToReferencePose();
+		HTR_LOG(Info, "Rigged_Man preview: reference pose restored.");
+		return;
+	}
+
+	// 실제 정점에 가장 많이 영향을 주는 자식 본을 골라 눈에 띄는 변형을 만든다.
+	const FSkeletalMeshData& Data = Component->GetSkeletalMesh()->GetMeshData();
+	TArray<float> BoneWeights;
+	BoneWeights.SetNum(Component->GetNumBones());
+	for (const FSkinWeightInfo& Weights : Data.SkinWeights)
+		for (uint32 i = 0; i < MaxBoneInfluences; ++i)
+			if (Weights.InfluenceWeights[i] > 0.0f)
+				BoneWeights[Weights.InfluenceBones[i]] += Weights.InfluenceWeights[i];
+	int32 BoneIndex = INDEX_NONE;
+	float LargestWeight = 0.0f;
+	for (int32 i = 1; i < BoneWeights.Num(); ++i)
+		if (BoneWeights[i] > LargestWeight)
+		{
+			BoneIndex = i;
+			LargestWeight = BoneWeights[i];
+		}
+	if (BoneIndex == INDEX_NONE && BoneWeights[0] > 0.0f) BoneIndex = 0;
+	if (BoneIndex == INDEX_NONE)
+	{
+		HTR_LOG(Warning, "Rigged_Man preview: mesh has no weighted vertices.");
+		return;
+	}
+	FTransform Pose = Component->GetBoneLocalTransform(BoneIndex);
+	Pose.Rotation.Yaw += 30.0f;
+	Component->SetBoneLocalTransform(BoneIndex, Pose);
+	HTR_LOG(Info, "Rigged_Man preview: bone '{}' yaw +30 degrees.",
+		Data.RefSkeleton.RawRefBoneInfo[BoneIndex].Name.ToString());
 }
 
 // 패널 요청과 입력을 뷰포트 클라이언트에 전달해 레이아웃과 카메라 상태를 갱신한다.
@@ -679,6 +762,7 @@ void UEditorEngine::RenderViewports()
 	}
 
 	UIEditorPanel->RenderPreview(*UIRenderer);
+	RenderSkeletalMeshPreview();
 }
 
 void UEditorEngine::UpdatePIEViewCamera()
@@ -711,6 +795,83 @@ bool UEditorEngine::IsSimulatingInEditor() const
 		if (Context.WorldType == EWorldType::PIE && Context.GameViewport)
 			return Context.GameViewport->IsSIEMode();
 	return false;
+}
+
+void UEditorEngine::RenderSkeletalMeshPreview()
+{
+	if (!SkeletalMeshEditorPanel || !SkeletalMeshEditorPanel->IsOpen()) return;
+
+	UWorld* PreviewWorld = SkeletalMeshEditorPanel->GetPreviewWorld();
+	FEditorViewportClient* PreviewClient = SkeletalMeshEditorPanel->GetViewportClient();
+	if (!PreviewWorld ||
+		!PreviewClient ||
+		PreviewClient->GetWidth() == 0 ||
+		PreviewClient->GetHeight() == 0 ||
+		!PreviewClient->GetColorTarget()) return;
+
+	FSceneRenderOptions Options;
+	BuildSceneRenderOptions(PreviewClient, false, Options);
+
+	const FSceneView SceneView = PreviewClient->CalcSceneView();
+
+	FSceneRenderer SceneRenderer(PreviewWorld, SceneView, PreviewClient->GetRenderData());
+	SceneRenderer.InitViews(Renderer, Options);
+
+	FSceneViewTargets& Targets = PreviewClient->GetViewTargets();
+	RenderScene(Targets, SceneView, SceneRenderer, PreviewWorld, Options,
+		[this, &SceneView, &Targets](FSceneOverlayCallbacks& Overlays)
+		{
+			if (SkeletalMeshEditorPanel->IsRenderGrid())
+			{
+				const FViewportSettings ViewportSettings
+				{
+					.StartX = 0,
+					.StartY = 0,
+					.Width = Targets.SceneColor->GetWidth(),
+					.Height = Targets.SceneColor->GetHeight(),
+					.MinDepth = 0.0f,
+					.MaxDepth = 1.0f,
+				};
+
+				Overlays.EditorGrid = [this, &SceneView, ViewportSettings]
+					{
+						GridRenderer->OnRenderBatchGrid(
+							SceneView.ViewProjectionMatrix,
+							SceneView.ViewLocation,
+							SceneView.ViewForward,
+							EGridPlane::XY,
+							static_cast<float>(SettingsPanel->GetSettings().GridSpacing),
+							SceneView.bIsPerspective,
+							ViewportSettings);
+					};
+			}
+
+			if (SkeletalMeshEditorPanel->IsRenderBones())
+			{
+				Overlays.EditorBones = [this, &SceneView]
+					{
+						BoneRenderer->OnRender(
+							SkeletalMeshEditorPanel->GetPreviewPose(),
+							SkeletalMeshEditorPanel->GetSelectedBoneIndex(),
+							SceneView.ViewProjectionMatrix,
+							SceneView.ViewLocation);
+					};
+			}
+
+			if (SkeletalMeshEditorPanel->GetBoneGizmo().GetTarget())
+			{
+				Overlays.EditorGizmo = [this, &SceneView]
+					{
+						GizmoRenderer->OnRender(
+							SkeletalMeshEditorPanel->GetBoneGizmo(),
+							SceneView.ViewProjectionMatrix,
+							SceneView.ViewLocation, 
+							!SceneView.bIsPerspective);
+					};
+			}
+			
+			Overlays.bClearEditorDepth = true;
+		});
 }
 
 void UEditorEngine::TickPIEInput(float DeltaTime)
@@ -1124,14 +1285,15 @@ void UEditorEngine::RenderFrame(FEditorViewportClient* ViewClient,
 			const FViewportSettings ViewportSetting{ 0, 0, Targets.SceneColor->GetWidth(),Targets.SceneColor->GetHeight(), 0.0f, 1.0f };
 			const bool bIsActiveViewport = ViewportsPanel && SceneView.ViewIndex == ViewportsPanel->GetActiveViewIndex();
 
-			const bool bDrawSelectedLight = bIsActiveViewport && Gizmo->GetTarget() &&
-				(Cast<ASpotLightActor>(Gizmo->GetTarget()->GetOwner()) ||
-					Cast<APointLightActor>(Gizmo->GetTarget()->GetOwner()) ||
-					Cast<ARectLightActor>(Gizmo->GetTarget()->GetOwner()));
+			USceneComponent* SelectedComponent = SelectionTarget.GetTarget();
+			AActor* SelectedActor = SelectedComponent ? SelectedComponent->GetOwner() : nullptr;
+
+			const bool bDrawSelectedLight = bIsActiveViewport &&
+				(Cast<ASpotLightActor>(SelectedActor) || Cast<APointLightActor>(SelectedActor) || Cast<ARectLightActor>(SelectedActor));
 
 			const bool bDrawCascadeBounds = SettingsPanel->GetSettings().bDrawCascadeBounds;
 			{
-				Overlays.EditorLines = [this, ViewClient, &SceneView, bDrawSelectedLight, bDrawCascadeBounds]
+				Overlays.EditorLines = [this, ViewClient, &SceneView, bDrawSelectedLight, bDrawCascadeBounds, SelectedActor]
 					{
 						LineBatcher->BeginFrame();
 						if (bDrawCascadeBounds)
@@ -1166,16 +1328,13 @@ void UEditorEngine::RenderFrame(FEditorViewportClient* ViewClient,
 						}
 						if (bDrawSelectedLight)
 						{
-							if (ASpotLightActor* Light = Cast<ASpotLightActor>(Gizmo->GetTarget()->GetOwner()))
+							if (ASpotLightActor* Light = Cast<ASpotLightActor>(SelectedActor))
 								Light->GetSpotLightComponent()->DrawDebug(LineBatcher.get());
-							else if (APointLightActor* Light = Cast<APointLightActor>(Gizmo->GetTarget()->GetOwner()))
+							else if (APointLightActor* Light = Cast<APointLightActor>(SelectedActor))
 								Light->GetPointLightComponent()->DrawDebug(LineBatcher.get());
-							else if (ARectLightActor* Light = Cast<ARectLightActor>(Gizmo->GetTarget()->GetOwner()))
+							else if (ARectLightActor* Light = Cast<ARectLightActor>(SelectedActor))
 								Light->GetRectLightComponent()->DrawDebug(LineBatcher.get());
 						}
-
-						const AActor* SelectedActor =
-							Gizmo->GetTarget() ? Gizmo->GetTarget()->GetOwner() : nullptr;
 
 						DrawCollisionShapes(EditorWorld, LineBatcher.get(), SelectedActor);
 						DrawSpringArms(EditorWorld, LineBatcher.get(), SelectedActor);
@@ -1254,6 +1413,7 @@ void UEditorEngine::PreExit()
 	EndPlayMap();
 	// 시퀀서는 에디터 월드 액터를 가리키므로 월드보다 먼저 정리한다
 	if (SequencerPanel) SequencerPanel->Shutdown();
+	if (SkeletalMeshEditorPanel) DestroyWorld(SkeletalMeshEditorPanel->ReleasePreviewWorld());
 	EditorWorld->ClearWorld();
 	// PIE 창이 열린 채 종료하면 Device가 살아 있을 때 Swapchain과 타깃을 먼저 정리한다.
 	DestroyPIEWindow();
@@ -1477,7 +1637,7 @@ void UEditorEngine::CopyPIEWindowToBackbuffer()
 // 씬 변경으로 무효화된 에디터의 선택 참조를 모두 해제한다.
 void UEditorEngine::ResetSceneSelection()
 {
-	Gizmo->SetTarget(nullptr, false);
+	SetSelectedComponent(nullptr);
 	Outline->SetTarget(nullptr);
 	DetailsPanel->SetTarget(nullptr);
 	OutlinerPanel->SelectActor(nullptr);

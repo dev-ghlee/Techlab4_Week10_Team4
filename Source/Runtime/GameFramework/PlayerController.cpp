@@ -8,7 +8,7 @@
 #include <cstring>
 
 APlayerController::APlayerController()
-	: ControlRotation(FRotator::Identitiy)
+	: ControlRotation(FRotator::Identity)
 {
 	PrimaryActorTick.bCanEverTick = true;
 }

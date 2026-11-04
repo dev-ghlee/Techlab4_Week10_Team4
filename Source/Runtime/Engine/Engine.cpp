@@ -11,6 +11,7 @@
 #include "Components/SlidingMovementComponent.h"
 #include "Audio/AudioDevice.h"
 #include "Components/AudioComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 
 #include "Serialization/JsonArchive.h"
 
@@ -26,6 +27,7 @@ bool UEngine::Init()
 	UIceVolumeComponent::StaticClass();
 	USlidingMovementComponent::StaticClass();
 	UAudioComponent::StaticClass();   // Add Component 목록에 뜨도록 (다른 컴포넌트와 동일)
+	USkeletalMeshComponent::StaticClass();
 
 
 	AssetManager = NewObject<UAssetManager>();

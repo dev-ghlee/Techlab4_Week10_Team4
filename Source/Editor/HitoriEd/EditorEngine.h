@@ -11,6 +11,8 @@
 #include "Editor/EditorUI/ImGuiRenderer.h"
 #include "Editor/Rendering/GridRenderer.h"
 #include "Editor/Gizmo/GizmoRenderer.h"
+#include "Editor/Gizmo/SceneComponentGizmoTarget.h"
+#include "Editor/SkeletalMeshEditor/BoneRenderer.h"
 #include "Render/LineBatcher.h"
 #include "Editor/Rendering/SceneDepthRenderer.h"
 #include "Editor/Rendering/CascadeFloorRenderer.h"
@@ -47,6 +49,8 @@
 #include "UI/UIDrawList.h"
 
 #include "EditorEngine.generated.h"
+
+class FSkeletalMeshEditorPanel;
 
 inline constexpr int32 InvalidViewIndex = -1;
 
@@ -103,6 +107,8 @@ protected:
 private:
 	// 이번 프레임 DeltaTime을 패널에 전달하고 에디터 단축키를 처리한다.
 	void BeginFrame(float DeltaTime);
+	// C의 Viewer 연결 전까지 Rigged_Man으로 CPU 스키닝을 직접 확인하는 임시 입력.
+	void HandleSkeletalMeshPreviewInput();
 	// 패널 요청과 입력을 적용해 레이아웃·카메라 상태를 갱신한다.
 	void UpdateViewportState(float DeltaTime);
 	// 월드를 정확히 한 번 Tick·Capture한 뒤 에디터 상호작용을 갱신한다.
@@ -140,6 +146,14 @@ private:
 	bool IsPlayingView(int32 ViewIndex) const { return PlayWorld && ViewIndex == PIEViewIndex && !bIsPaused && !IsSimulatingInEditor(); }
 	bool IsSimulatingInEditor() const;
 
+	void RenderSkeletalMeshPreview();
+
+	void SetSelectedComponent(USceneComponent* Component)
+	{
+		SelectionTarget.SetTarget(Component);
+		Gizmo->SetTarget(Component ? &SelectionTarget : nullptr);
+	}
+
 	// FEngineLoop 소유. OnInit에서 받아 둔다.
 	FWindow* MainWindow = nullptr;
 	FSwapchain* MainWindowSC = nullptr;
@@ -150,6 +164,7 @@ private:
 	TUniquePtr<FImGuiRenderer> ImGuiRenderer;
 	TUniquePtr<FGridRenderer> GridRenderer;
 	TUniquePtr<FGizmoRenderer> GizmoRenderer;
+	TUniquePtr<FBoneRenderer> BoneRenderer;
 	TUniquePtr<FTextRenderer> TextRenderer;
 	TUniquePtr<FLineBatcher> LineBatcher;
 	TUniquePtr<FOutline> Outline;
@@ -158,6 +173,7 @@ private:
 	TUniquePtr<FCascadeFloorRenderer> CascadeFloorRenderer;
 	TUniquePtr<FUIRenderer> UIRenderer;
 	TUniquePtr<FGizmo> Gizmo;
+	FSceneComponentGizmoTarget SelectionTarget;
 
 	FUIDrawList UIDrawList;
 
@@ -177,6 +193,7 @@ private:
 	FOutlinerPanel* OutlinerPanel = nullptr;
 	FContentDrawerPanel* ContentDrawerPanel = nullptr;
 	FUIEditorPanel* UIEditorPanel = nullptr;
+	FSkeletalMeshEditorPanel* SkeletalMeshEditorPanel = nullptr;
 
 	UWorld* EditorWorld = nullptr;
 	UWorld* PlayWorld = nullptr;

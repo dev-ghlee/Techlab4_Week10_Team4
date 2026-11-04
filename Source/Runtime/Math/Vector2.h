@@ -38,4 +38,9 @@ struct FVector2
 
 	bool operator==(const FVector2& Other) const { return X == Other.X && Y == Other.Y; }
 	bool operator!=(const FVector2& Other) const { return !(*this == Other); }
-};
+
+	float SizeSquared() const { return X * X + Y * Y; }
+	float Length() const { return sqrtf(X * X + Y * Y); }
+
+	float Dot(const FVector2& Other) const { return X * Other.X + Y * Other.Y; }
+};

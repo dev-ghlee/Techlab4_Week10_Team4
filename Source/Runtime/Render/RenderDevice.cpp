@@ -386,6 +386,21 @@ void FRenderDevice::CreateStates()
 		AlwaysDesc.DepthFunc = D3D11_COMPARISON_ALWAYS;
 		AlwaysDesc.StencilEnable = FALSE;
 		Device->CreateDepthStencilState(&AlwaysDesc, DepthStencilStates[(uint8)EDepthStencilState::AlwaysWrite].GetAddressOf());
+
+		// 기존 깊이보다 뒤에 있는 픽셀에만, 픽셀당 한 번만 그린다 (참조값 0 기준).
+		D3D11_DEPTH_STENCIL_DESC OccludedDesc = {};
+		OccludedDesc.DepthEnable = TRUE;
+		OccludedDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+		OccludedDesc.DepthFunc = D3D11_COMPARISON_GREATER_EQUAL;
+		OccludedDesc.StencilEnable = TRUE;
+		OccludedDesc.StencilReadMask = D3D11_DEFAULT_STENCIL_READ_MASK;
+		OccludedDesc.StencilWriteMask = D3D11_DEFAULT_STENCIL_WRITE_MASK;
+		OccludedDesc.FrontFace.StencilFunc = D3D11_COMPARISON_EQUAL;
+		OccludedDesc.FrontFace.StencilPassOp = D3D11_STENCIL_OP_INCR_SAT;
+		OccludedDesc.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+		OccludedDesc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+		OccludedDesc.BackFace = OccludedDesc.FrontFace;
+		Device->CreateDepthStencilState(&OccludedDesc, DepthStencilStates[(uint8)EDepthStencilState::OccludedOnce].GetAddressOf());
 	}
 
 	// ---------- Blend ----------

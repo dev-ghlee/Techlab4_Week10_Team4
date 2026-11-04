@@ -1,8 +1,7 @@
 #include "EnginePCH.h"
 #include "Editor/Gizmo/Gizmo.h"
-#include "Camera/CameraComponent.h"
-#include "GameFramework/Actor.h"
-#include "GameFramework/Actor/LightActorBase.h"
+
+#include "GizmoTarget.h"
 
 static const FVector AxisDirs[3] = {
 	FVector(1, 0, 0),
@@ -43,7 +42,7 @@ void FGizmo::Update(const FRay& MouseRay, const FVector2& MousePos, const FMatri
 	HoveredAxis = PickAxis(MousePos, ViewProj, ScreenW, ScreenH); // 현재 마우스가 올라간 기즈모 축이 있으면
 
 	if (bMouseDown && HoveredAxis >= 0) // 마우스가 올라간 축이 있고 마우스가 눌렸으면
-		BeginDrag(HoveredAxis, MouseRay, MousePos);
+		BeginDrag(HoveredAxis, MouseRay, MousePos, ViewProj, ScreenW, ScreenH);
 
 
 }
@@ -162,36 +161,18 @@ int FGizmo::PickRotationAxis(const FVector2& MousePos, const FMatrix& ViewProj, 
 	return Best;
 }
 
-// LocalLightComponet 가져오기 (Rect, Point, Spot 등 Radius를 파라미터로 것들)
-ULocalLightComponent* FGizmo::GetTargetLight() const
-{
-    if (!Target) return nullptr;
-    ALightActorBase* Actor = Cast<ALightActorBase>(Target->GetOwner());
-    return Actor ? Cast<ULocalLightComponent>(Actor->GetLightComponent()) : nullptr;
-}
-
-// 조명이면 radius만 바꾸고 true를 반환
-bool FGizmo::ApplyScaleToLight(float Factor)
-{
-    ULocalLightComponent* Light = GetTargetLight();
-    if (!Light) return false;
-    Light->SetAttenuationRadius(DragStartRadius * Factor);
-    return true;
-}
-
 // 시작 Transform·교차점을 저장하고 조작 축의 드래그 평면을 정한다.
-void FGizmo::BeginDrag(int Axis, const FRay& MouseRay, const FVector2& MousePos)
+void FGizmo::BeginDrag(int Axis, const FRay& MouseRay, const FVector2& MousePos, const FMatrix& ViewProj, int ScreenW, int ScreenH)
 {
 	DragStartMousePos = MousePos;
+	DragStartCenterPos = WorldToScreen(GetRenderLocation(), ViewProj, ScreenW, ScreenH);
 	DraggingAxis = Axis;
 	DragStartLocation = GetLocation();
 	DragStartRenderLocation = GetRenderLocation();    
 	DragStartRotation = GetRotation();
 	DragStartScale = GetScale();
 
-	// Local LightComponent면 Radius 가져와서 저장해놓기
-	if (ULocalLightComponent* Light = GetTargetLight())
-    	DragStartRadius = Light->GetAttenuationRadius();
+	Target->OnBeginDrag();
 
 	DragAxisDirection = GetAxisDirection(Axis);
 	FVector axis = DragAxisDirection;
@@ -200,7 +181,7 @@ void FGizmo::BeginDrag(int Axis, const FRay& MouseRay, const FVector2& MousePos)
 	{
 		if (Mode == EGizmoMode::Rotation)
 		{
-			DragAxisDirection = (GetRenderLocation() - GetCameraLocation()).Normalized();
+			DragAxisDirection = (GetCameraLocation() - GetRenderLocation()).Normalized();
 			DragPlaneNormal = DragAxisDirection;
 		}
 		else
@@ -223,21 +204,36 @@ void FGizmo::BeginDrag(int Axis, const FRay& MouseRay, const FVector2& MousePos)
 		DragPlaneNormal = Ortho.Cross(axis).Normalized();
 	}
 
+	const FVector DragStart = Mode == EGizmoMode::Location ? DragStartLocation : DragStartRenderLocation;
+
 	float t;
-	if (RayIntersectsPlane(MouseRay, DragStartRenderLocation, DragPlaneNormal, t))
+	if (RayIntersectsPlane(MouseRay, DragStart, DragPlaneNormal, t))
 		DragStartPoint = MouseRay.Origin + MouseRay.Direction * t;
 	else
-		DragStartPoint = DragStartRenderLocation;
-
-	if (Mode == EGizmoMode::Rotation)
-		DragStartAngle = ComputeAngleOnPlane(DragStartPoint, Axis);
+		DragStartPoint = DragStart;
 }
 
 // 평면 교차점 변화를 이동·회전·크기에 반영한다.
 void FGizmo::UpdateDrag(const FRay& MouseRay, const FVector2& MousePos)
 {
+	const FVector DragStart = Mode == EGizmoMode::Location ? DragStartLocation : DragStartRenderLocation;
+
+	if (Mode == EGizmoMode::Rotation)
+	{
+		FVector2 Start = DragStartMousePos - DragStartCenterPos;
+		FVector2 Current = MousePos - DragStartCenterPos;
+		float Angle = std::atan2(Start.X * Current.Y - Start.Y * Current.X, Start.X * Current.X + Start.Y * Current.Y);
+
+		FQuat Delta = FQuat::MakeFromAxisAngle(DragAxisDirection, Angle);
+
+		FQuat result = Delta * DragStartRotation.Quaternion();
+
+		Target->SetRotation(result.ToFRotator());
+		return;
+	}
+
 	float t;
-	if (!RayIntersectsPlane(MouseRay, DragStartRenderLocation, DragPlaneNormal, t))
+	if (!RayIntersectsPlane(MouseRay, DragStart, DragPlaneNormal, t))
 		return;
 
 	FVector current = MouseRay.Origin + MouseRay.Direction * t;
@@ -245,7 +241,7 @@ void FGizmo::UpdateDrag(const FRay& MouseRay, const FVector2& MousePos)
 	if (DraggingAxis == AXIS_SCREEN && Mode != EGizmoMode::Rotation)
 	{
 		if (Mode == EGizmoMode::Location)
-			Target->SetRelativeLocation(DragStartLocation + (current - DragStartPoint));
+			Target->SetLocation(DragStartLocation + (current - DragStartPoint));
 		else
 		{
 			float dx = MousePos.X - DragStartMousePos.X;
@@ -255,23 +251,9 @@ void FGizmo::UpdateDrag(const FRay& MouseRay, const FVector2& MousePos)
 			float factor = 1.0f + scaleDelta;
 			if (factor < 0.01f) factor = 0.01f;
 
-			if (!ApplyScaleToLight(factor)) 	// 조명이면 여기서 radius만 변경하고 return
-				Target->SetRelativeScale3D(DragStartScale * factor);
+			if (!Target->ApplyScaleFactor(factor)) 	// 조명이면 여기서 radius만 변경하고 return
+				Target->SetScale(DragStartScale * factor);
 		}
-		return;
-	}
-
-	if (Mode == EGizmoMode::Rotation)
-	{
-		float currentAngle = ComputeAngleOnPlane(current, DraggingAxis);
-		float deltaAngle = currentAngle - DragStartAngle;
-
-		FQuat delta = FQuat::MakeFromAxisAngle(DragAxisDirection, deltaAngle);
-		FQuat start = DragStartRotation.Quaternion();
-
-		FQuat result = delta * start;
-
-		Target->SetRelativeRotation(result.ToFRotator());
 		return;
 	}
 
@@ -279,21 +261,21 @@ void FGizmo::UpdateDrag(const FRay& MouseRay, const FVector2& MousePos)
 	float amount = delta.Dot(DragAxisDirection);
 
 	if (Mode == EGizmoMode::Location)
-		Target->SetRelativeLocation(DragStartLocation + DragAxisDirection * amount);
+		Target->SetLocation(DragStartLocation + DragAxisDirection * amount);
 	else   // Scale
 	{
 		float factor = 1.0f + amount;
 		if (factor < 0.01f) factor = 0.01f;
 
-		// 조명이면 여기서 radius만 반영하고 return
-		if (ApplyScaleToLight(factor)) return;
+		// 대상이 직접 처리하면 return
+		if (Target->ApplyScaleFactor(factor)) return;
 
 		FVector NewScale = DragStartScale;
 		if (DraggingAxis == 0)      NewScale.X *= factor;
 		else if (DraggingAxis == 1) NewScale.Y *= factor;
 		else                        NewScale.Z *= factor;
 
-		Target->SetRelativeScale3D(NewScale);
+		Target->SetScale(NewScale);
 	}
 }
 
@@ -330,6 +312,33 @@ float FGizmo::ComputeAngleOnPlane(const FVector& Point, int Axis) const
 	return atan2f(local.Dot(v), local.Dot(u));
 }
 
+FVector FGizmo::GetLocation() const
+{
+	if (Target)
+	{
+		return Target->GetLocation();
+	}
+	return FVector::ZeroVector;
+}
+
+FRotator FGizmo::GetRotation() const
+{
+	if (Target)
+	{
+		return Target->GetRotation();
+	}
+	return FRotator::Identity;
+}
+
+FVector FGizmo::GetScale() const
+{
+	if (Target)
+	{
+		return Target->GetScale();
+	}
+	return FVector::OneVector;
+}
+
 // 월드 축 또는 로컬 회전으로 변환한 정규화 축을 반환한다.
 FVector FGizmo::GetAxisDirection(int Axis) const
 {
@@ -338,7 +347,7 @@ FVector FGizmo::GetAxisDirection(int Axis) const
 
 	if (bUseLocal && Target)
 	{
-		FMatrix rot = Target->GetRelativeRotation().Quaternion().ToFMatrix();
+		FMatrix rot = Target->GetRotation().Quaternion().ToFMatrix();
 		FVector4 v = rot.TransformVector(AxisDirs[Axis]);
 		return FVector(v.X, v.Y, v.Z).Normalized();
 	}
@@ -356,18 +365,7 @@ FVector FGizmo::GetRenderLocationForView(const FVector& CameraLocation, const bo
 {
 	if (!Target) return FVector(0, 0, 0);
 
-	FVector PivotLocation = Target->GetWorldLocation();
-
-	// bounds 합집합 중앙에 기즈모 표시
-	/*if (bUseActorBounds)
-	{
-		FBox Bounds;
-		if (Target->GetOwner()->TryGetActorBounds(Bounds))
-		{
-			PivotLocation = (Bounds.Min + Bounds.Max) * 0.5f;
-			
-		}
-	}*/
+	FVector PivotLocation = Target->GetPivotLocation();
 
 	if (bCameraOrthographic) return PivotLocation;
 

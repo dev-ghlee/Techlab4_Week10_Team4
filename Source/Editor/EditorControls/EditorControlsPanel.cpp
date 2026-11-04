@@ -24,6 +24,9 @@ void FEditorControlsPanel::Tick(float DeltaTime)
 	if (ImGui::GetIO().WantTextInput)
 		return;
 
+	if (GizmoInputBlockedQuery && GizmoInputBlockedQuery())
+		return;
+
 	if (Gizmo && FInputSystem::IsKeyPressed(EKeyCode::Space))
 	{
 		const int NextMode = (static_cast<int>(Gizmo->GetMode()) + 1) % 3;

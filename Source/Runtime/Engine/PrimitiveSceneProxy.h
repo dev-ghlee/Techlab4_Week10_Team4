@@ -2,20 +2,28 @@
 
 #include "Math/Frustum.h"
 #include "Render/MeshRenderData.h"
+#include "Render/MeshGeometry.h"
 
 class FScene;
 class UPrimitiveComponent;
 class UStaticMesh;
 class UMaterial;
+class FRenderQueue;
+struct FViewContext;
 
 class FPrimitiveSceneProxy
 {
 public:
 	explicit FPrimitiveSceneProxy(UPrimitiveComponent* InComponent);
 	
-	~FPrimitiveSceneProxy();
+	virtual ~FPrimitiveSceneProxy();
+	// 컬링 전에 메인 스레드에서 실행한다. 정적 프리미티브는 갱신할 동적 데이터가 없다.
+	virtual void UpdateDynamicData() {}
 	void UpdateTransform();
-	void UpdateRenderState();
+	virtual void UpdateRenderState();
+	virtual FBox GetLocalBounds() const;
+	virtual FMeshGeometry GetGeometry(uint32 LODIndex = 0) const;
+	virtual void GatherMeshElements(FRenderQueue& Queue, const FViewContext& View) const;
 	void OnMeshRenderDataChanged();
 	void OnMeshDestroyed();
 
@@ -27,11 +35,15 @@ public:
 	UStaticMesh* GetMesh() const { return Mesh; }
 	bool IsVisible() const { return bVisible; }
 	bool IsShown(bool bGameView) const { return bVisible && !(bGameView && bHiddenInGame); }
-	uint8 GetLODCount() const { return RenderState ? RenderState->LODCount : 1; }
-	const FMeshRenderState* GetRenderState() const { return RenderState.get(); }
-	const float* GetLODThresholdsSq() const { return RenderState->LODThresholdSq; }
-	const FCachedMeshLOD& GetLOD(uint32 Index) const { return RenderState->LODs[Index]; }
-	const FCachedMeshSection& GetSection(uint32 Index) const { return RenderState->Sections[Index]; }
+	uint8 GetLODCount() const
+	{
+		const FMeshRenderState* State = GetRenderState();
+		return State ? State->LODCount : 1;
+	}
+	virtual const FMeshRenderState* GetRenderState() const { return RenderState.get(); }
+	const float* GetLODThresholdsSq() const { return GetRenderState()->LODThresholdSq; }
+	const FCachedMeshLOD& GetLOD(uint32 Index) const { return GetRenderState()->LODs[Index]; }
+	const FCachedMeshSection& GetSection(uint32 Index) const { return GetRenderState()->Sections[Index]; }
 	FScene* GetScene() const { return Scene; }
 
 	void SetCastShadow(bool NewValue);
