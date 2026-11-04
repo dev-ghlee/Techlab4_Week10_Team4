@@ -3,6 +3,7 @@
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Render/Mesh.h"
+#include "Render/RenderPacket.h"
 #include "Engine/Scene.h"
 
 FPrimitiveSceneProxy::FPrimitiveSceneProxy(UPrimitiveComponent* InComponent)
@@ -13,6 +14,11 @@ FPrimitiveSceneProxy::FPrimitiveSceneProxy(UPrimitiveComponent* InComponent)
 FPrimitiveSceneProxy::~FPrimitiveSceneProxy()
 {
     if (Mesh) Mesh->UnregisterProxy(this);
+}
+
+bool FPrimitiveSceneProxy::IsShown(const FViewContext& View) const
+{
+    return IsShown(View.bGameView);
 }
 
 void FPrimitiveSceneProxy::OnMeshRenderDataChanged()

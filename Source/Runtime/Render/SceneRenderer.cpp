@@ -190,7 +190,7 @@ void FSceneRenderer::CollectDecalReceivers(const FDecalSceneProxy* Decal, TArray
 		},
 		[ & ](FPrimitiveSceneProxy* Proxy)
 		{
-			if(!Proxy || !Proxy->IsReceivesDecals())
+			if(!Proxy || !Proxy->IsShown(CachedViewContext) || !Proxy->IsReceivesDecals())
 			{
 				return;
 			}
@@ -418,6 +418,7 @@ void FSceneRenderer::InitViews(FRenderer* Renderer, const FSceneRenderOptions& O
 	}
 
 	// 월드 프리미티브 수집 및 절두체 컬링
+	CachedViewContext.bShowSkeletalMesh = Options.bShowSkeletalMesh;
 	GatherRenderPackets(World->GetScene(), RenderData, CachedViewContext, &View.Frustum, Renderer);
 	RenderData.AmbientLight = World->GetScene().GetSkyAmbientLight(View.bGameView);
 
@@ -1124,7 +1125,7 @@ void FSceneRenderer::GatherRenderPackets(FScene& Scene, FSceneRenderData& Data,
 		// 표시 상태는 프록시 캐시로 판정해 오클루전과 드로우 수집 전에 제외한다.
 		const auto Visit = [&](FPrimitiveSceneProxy* Proxy)
 		{
-			if (Proxy->IsShown(View.bGameView)) VisibleProxies.Add(Proxy);
+			if (Proxy->IsShown(View)) VisibleProxies.Add(Proxy);
 		};
 
 		if (Frustum)
