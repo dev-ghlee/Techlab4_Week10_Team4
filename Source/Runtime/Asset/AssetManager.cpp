@@ -327,7 +327,26 @@ void UAssetManager::LoadAsset(const FString& Key, const FString& Path) {
 	if (Extension == ".fbx")
 	{
 		FString Error;
-		if (!LoadFbxSkeletalMesh(Key, Path, Error))
+		EFbxMeshType MeshType = EFbxMeshType::StaticMesh;
+
+		// Skin 연결 여부로 임포트할 메시 타입을 결정한다.
+		if (!FFbxImporter::DetectMeshType(Path, MeshType, Error))
+		{
+			HTR_LOG(Error, "Failed to inspect FBX '{}': {}", Path, Error);
+			return;
+		}
+
+		URenderAsset* Mesh = nullptr;
+		if (MeshType == EFbxMeshType::SkeletalMesh)
+		{
+			Mesh = LoadFbxSkeletalMesh(Key, Path, Error);
+		}
+		else
+		{
+			Mesh = LoadFbxStaticMesh(Key, Path, Error);
+		}
+
+		if (!Mesh)
 		{
 			HTR_LOG(Error, "Failed to load FBX '{}': {}", Path, Error);
 		}
@@ -590,6 +609,45 @@ UStaticMesh* UAssetManager::LoadObjStaticMesh(const FString& Path)
 
 	Get().RegisterAsset(Key, Mesh);
 	return Mesh;
+}
+
+UStaticMesh* UAssetManager::LoadFbxStaticMesh(const FString& Key, const FString& Path, FString& OutError)
+{
+	OutError.clear();
+
+	// 같은 Key로 등록된 메시가 있으면 기존 리소스를 재사용한다.
+	URenderAsset** CachedAsset = AssetMap.Find(Key);
+	if (CachedAsset && *CachedAsset)
+	{
+		UStaticMesh* CachedMesh = Cast<UStaticMesh>(*CachedAsset);
+		if (!CachedMesh)
+		{
+			OutError = "Asset key is already used by another asset type: " + Key;
+		}
+
+		return CachedMesh;
+	}
+
+	// SDK 객체를 포함하지 않는 엔진용 CPU 데이터를 받는다.
+	FStaticMeshData MeshData;
+	if (!FFbxImporter::LoadStaticMesh(Path, MeshData, OutError))
+	{
+		return nullptr;
+	}
+
+	// 기존 경로에서 탄젠트·재질·GPU 버퍼·피킹용 BVH를 생성한다.
+	UStaticMesh* StaticMesh = CreateStaticMesh(&MeshData);
+	if (!StaticMesh)
+	{
+		OutError = "Failed to create static mesh.";
+		return nullptr;
+	}
+
+	// 완성된 리소스와 원본 파일 경로를 같은 Key로 등록한다.
+	RegisterAsset(Key, StaticMesh);
+	AssetPathMap.Add(Key, Path);
+
+	return StaticMesh;
 }
 
 USkeletalMesh* UAssetManager::LoadFbxSkeletalMesh(const FString& Key, const FString& Path, FString& OutError)
