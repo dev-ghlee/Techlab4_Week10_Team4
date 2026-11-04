@@ -334,8 +334,8 @@ PSInput mainVS(VSInput input)
     return Output;
 }
 
-float3 GetDecalShadingNormal(PSInput input, float2 DecalUV)
-{
+float3 GetDecalShadingNormal(PSInput input, float2 DecalUV, float DecalAlpha)
+{     
     float3 N = normalize(input.WorldNormal);
     float4 NormalSample = DecalNormalTexture.Sample(ClampSampler, DecalUV);
     
@@ -350,11 +350,12 @@ float3 GetDecalShadingNormal(PSInput input, float2 DecalUV)
         {
             float3 T = WorldTangent * rsqrt(TangentLenSq);
             float3 B = cross(N, T) * input.WorldTangent.w;
-            float3 MappedNormal = T * MapNormal.x + B * MapNormal.y + N * MapNormal.z;
-            float MappedLenSq = dot(MappedNormal, MappedNormal);
+            float3 MappedNormal = T * MapNormal.x + B * MapNormal.y + N * MapNormal.z;            
+            float3 FinalShadingNormal = normalize(lerp(N, MappedNormal, DecalAlpha));
+            float MappedLenSq = dot(FinalShadingNormal, FinalShadingNormal);
             if (MappedLenSq > 1.0e-8f)
             {
-                N = MappedNormal * rsqrt(MappedLenSq);
+                N = FinalShadingNormal * rsqrt(MappedLenSq);
             }
         }
     }
@@ -386,6 +387,7 @@ float4 mainPS(PSInput input) : SV_TARGET
     float3 DecalAlbedo = pow(max(DecalColorSample.rgb, 0.0f), 2.2f) * DecalColor.rgb;
     
     float3 FinalColor;
+    float FinalAlpha = DecalColorSample.a * DecalColor.a * FadeZ;
     if (DecalForward.w > 0.5f)
     {
         // Emissive / Unlit decal (e.g., Fake Spot Light): shines even without scene lights
@@ -394,16 +396,14 @@ float4 mainPS(PSInput input) : SV_TARGET
     else
     {
         // Perturbed surface normal from decal normal map
-        float3 ShadingNormal = GetDecalShadingNormal(input, DecalUV);
+        float3 ShadingNormal = GetDecalShadingNormal(input, DecalUV, FinalAlpha);
         
         // Calculate full forward tiled lighting
         FLightResult LitResult = CalculateTiledLighting(input.Position.xyz, input.WorldPosition, input.ViewDepth, ShadingNormal, true);
         
         // Combine diffuse and specular
         FinalColor = (DecalAlbedo * LitResult.Diffuse) + LitResult.Specular;
-    }
-    
-    float FinalAlpha = DecalColorSample.a * DecalColor.a * FadeZ;
+    }       
     
     return float4(FinalColor, FinalAlpha);
 }
