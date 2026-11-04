@@ -104,7 +104,7 @@ void FEditorControlsPanel::OnRender()
 		World->SpawnActor(ARectLightActor::StaticClass());
 	ImGui::SameLine();
 	if (ImGui::Button("Sky Light"))
-		World->SpawnActor(ASkyLightActor::StaticClass());
+		World->SpawnActor(ASkyLightActor::StaticClass());	
 
 	//////////////////////////////////////////////////////
 

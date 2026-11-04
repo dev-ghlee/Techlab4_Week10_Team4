@@ -5,7 +5,7 @@
 
 class UDecalComponent;
 class UBillboardComponent;
-
+class UStaticMeshComponent;
 
 UCLASS()
 class ADecalActor : public AActor
@@ -17,7 +17,10 @@ public:
 
 	UDecalComponent* GetDecal() const { return DecalComponent; }
 
+	virtual void RegisterAllComponents() override;
+
 private:
 	UDecalComponent* DecalComponent;
 	UBillboardComponent* SpriteComponent;
+	UStaticMeshComponent* ArrowComponent;
 };
