@@ -12,6 +12,7 @@
 
 #include "Asset/ObjImporter/ObjImporter.h"
 #include "Asset/FbxImporter/FbxImporter.h"
+#include "Asset/FbxImporter/FbxMeshBake.h"
 
 #include "Render/GeometryGenerator.h"
 #include "UObject/UObjectGlobals.h"
@@ -328,24 +329,40 @@ void UAssetManager::LoadAsset(const FString& Key, const FString& Path) {
 	}
 	if (Extension == ".fbx")
 	{
+		// 메모리에 등록된 메시라면 디스크 접근과 타입 판별도 생략한다.
+		if (URenderAsset** CachedAsset = AssetMap.Find(Key); CachedAsset && *CachedAsset)
+		{
+			if (!Cast<UStaticMesh>(*CachedAsset) && !Cast<USkeletalMesh>(*CachedAsset))
+			{
+				HTR_LOG(Error, "Asset key is already used by another asset type: {}", Key);
+			}
+			return;
+		}
+
 		FString Error;
 		EFbxMeshType MeshType = EFbxMeshType::StaticMesh;
-
-		// Skin 연결 여부로 임포트할 메시 타입을 결정한다.
-		if (!FFbxImporter::DetectMeshType(Path, MeshType, Error))
+		FFbxBakeResult BakeResult;
+		const bool bHasBake = FFbxMeshBake::ReadBaked(Path, BakeResult);
+		if (bHasBake)
+		{
+			// 복원에 성공하면 FBX 파일을 열어 타입을 판별할 필요가 없다.
+			MeshType = BakeResult.MeshType == EFbxBakeMeshType::StaticMesh ? EFbxMeshType::StaticMesh : EFbxMeshType::SkeletalMesh;
+		}
+		else if (!FFbxImporter::DetectMeshType(Path, MeshType, Error))
 		{
 			HTR_LOG(Error, "Failed to inspect FBX '{}': {}", Path, Error);
 			return;
 		}
 
+		FFbxBakeResult* BakedData = bHasBake ? &BakeResult : nullptr;
 		URenderAsset* Mesh = nullptr;
 		if (MeshType == EFbxMeshType::SkeletalMesh)
 		{
-			Mesh = LoadFbxSkeletalMesh(Key, Path, Error);
+			Mesh = LoadFbxSkeletalMesh(Key, Path, Error, BakedData);
 		}
 		else
 		{
-			Mesh = LoadFbxStaticMesh(Key, Path, Error);
+			Mesh = LoadFbxStaticMesh(Key, Path, Error, BakedData);
 		}
 
 		if (!Mesh)
@@ -613,7 +630,7 @@ UStaticMesh* UAssetManager::LoadObjStaticMesh(const FString& Path)
 	return Mesh;
 }
 
-UStaticMesh* UAssetManager::LoadFbxStaticMesh(const FString& Key, const FString& Path, FString& OutError)
+UStaticMesh* UAssetManager::LoadFbxStaticMesh(const FString& Key, const FString& Path, FString& OutError, FFbxBakeResult* BakedData)
 {
 	OutError.clear();
 
@@ -630,11 +647,32 @@ UStaticMesh* UAssetManager::LoadFbxStaticMesh(const FString& Key, const FString&
 		return CachedMesh;
 	}
 
-	// SDK 객체를 포함하지 않는 엔진용 CPU 데이터를 받는다.
 	FStaticMeshData MeshData;
-	if (!FFbxImporter::LoadStaticMesh(Path, MeshData, OutError))
+	FFbxBakeResult LocalBakeResult;
+	if (!BakedData && FFbxMeshBake::ReadBaked(Path, LocalBakeResult))
 	{
-		return nullptr;
+		BakedData = &LocalBakeResult;
+	}
+	if (BakedData)
+	{
+		if (BakedData->MeshType != EFbxBakeMeshType::StaticMesh || !BakedData->StaticMeshData)
+		{
+			OutError = "FBX cache does not contain static mesh data: " + Path;
+			return nullptr;
+		}
+		MeshData = std::move(*BakedData->StaticMeshData);
+	}
+	else
+	{
+		if (!FFbxImporter::LoadStaticMesh(Path, MeshData, OutError))
+		{
+			return nullptr;
+		}
+		// 캐시 저장 실패는 현재 임포트 결과의 사용을 막지 않는다.
+		if (!FFbxMeshBake::WriteBaked(Path, MeshData))
+		{
+			HTR_LOG(Warning, "Failed to save FBX cache: {}", Path);
+		}
 	}
 
 	// 기존 경로에서 탄젠트·재질·GPU 버퍼·피킹용 BVH를 생성한다.
@@ -652,7 +690,7 @@ UStaticMesh* UAssetManager::LoadFbxStaticMesh(const FString& Key, const FString&
 	return StaticMesh;
 }
 
-USkeletalMesh* UAssetManager::LoadFbxSkeletalMesh(const FString& Key, const FString& Path, FString& OutError)
+USkeletalMesh* UAssetManager::LoadFbxSkeletalMesh(const FString& Key, const FString& Path, FString& OutError, FFbxBakeResult* BakedData)
 {
 	OutError.clear();
 
@@ -670,11 +708,32 @@ USkeletalMesh* UAssetManager::LoadFbxSkeletalMesh(const FString& Key, const FStr
 		return CachedMesh;
 	}
 
-	// SDK 객체를 포함하지 않는 엔진 원본 데이터를 받는다.
 	FSkeletalMeshData MeshData;
-	if (!FFbxImporter::LoadScene(Path, MeshData, OutError))
+	FFbxBakeResult LocalBakeResult;
+	if (!BakedData && FFbxMeshBake::ReadBaked(Path, LocalBakeResult))
 	{
-		return nullptr;
+		BakedData = &LocalBakeResult;
+	}
+	if (BakedData)
+	{
+		if (BakedData->MeshType != EFbxBakeMeshType::SkeletalMesh || !BakedData->SkeletalMeshData)
+		{
+			OutError = "FBX cache does not contain skeletal mesh data: " + Path;
+			return nullptr;
+		}
+		MeshData = std::move(*BakedData->SkeletalMeshData);
+	}
+	else
+	{
+		if (!FFbxImporter::LoadScene(Path, MeshData, OutError))
+		{
+			return nullptr;
+		}
+		// .pose 덮어쓰기 전 데이터를 저장하고 복원 후에도 현재 .pose를 적용한다.
+		if (!FFbxMeshBake::WriteBaked(Path, MeshData))
+		{
+			HTR_LOG(Warning, "Failed to save FBX cache: {}", Path);
+		}
 	}
 
 	const FString PosePath = fs::path(Path).replace_extension(".pose").generic_string();
@@ -692,6 +751,12 @@ USkeletalMesh* UAssetManager::LoadFbxSkeletalMesh(const FString& Key, const FStr
 	if (!SkeletalMesh)
 	{
 		return nullptr;
+	}
+
+	// 캐시 파일의 존재 여부가 아니라 실제 복원에 사용한 출처를 기록한다.
+	if (BakedData)
+	{
+		SkeletalMesh->SetLoadedBakePath(FFbxMeshBake::GetBakePath(Path));
 	}
 
 	// 완성된 리소스만 등록한다. 실패 결과는 캐시에 남기지 않는다.

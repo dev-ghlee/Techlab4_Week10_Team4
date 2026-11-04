@@ -21,6 +21,7 @@ class UMaterial;
 class USoundWave;
 struct FMeshMaterialSlot;
 struct FSkeletalMeshData;
+struct FFbxBakeResult;
 
 namespace fs = std::filesystem;
 
@@ -73,10 +74,10 @@ public:
 	static UStaticMesh* LoadObjStaticMesh(const FString& Path);
 
 	// FBX에서 StaticMesh를 생성하고 Key로 등록한다.
-	UStaticMesh* LoadFbxStaticMesh(const FString& Key, const FString& Path, FString& OutError);
+	UStaticMesh* LoadFbxStaticMesh(const FString& Key, const FString& Path, FString& OutError, FFbxBakeResult* BakedData = nullptr);
 
 	// Key는 조회 및 등록 식별자이고 Path는 실제 FBX 파일 경로다.
-	USkeletalMesh* LoadFbxSkeletalMesh(const FString& Key, const FString& Path, FString& OutError);
+	USkeletalMesh* LoadFbxSkeletalMesh(const FString& Key, const FString& Path, FString& OutError, FFbxBakeResult* BakedData = nullptr);
 
 	FLODGenerateResult GenerateStaticMeshLODs(UStaticMesh& Mesh,const FLODGenerateRequest& Request);
 

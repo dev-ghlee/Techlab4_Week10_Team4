@@ -497,6 +497,12 @@ bool FSkeletalMeshEditorPanel::LoadMesh(const FString& Path)
 		return false;
 	}
 
+	// 메모리의 메시를 재사용해도 최초 로딩 시의 캐시 복원 출처를 표시한다.
+	if (!Mesh->GetLoadedBakePath().empty())
+	{
+		HTR_LOG(Info, "[FBX Bake] Using restored data: {}", Mesh->GetLoadedBakePath());
+	}
+
 	PreviewMeshComponent->SetSkeletalMesh(Mesh);
 	SetSkeleton(Mesh->GetRefSkeleton());
 
