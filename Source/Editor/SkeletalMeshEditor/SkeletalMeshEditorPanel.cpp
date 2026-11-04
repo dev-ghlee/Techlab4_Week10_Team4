@@ -488,8 +488,9 @@ void FSkeletalMeshEditorPanel::SetSkeleton(const FReferenceSkeleton& Skeleton)
 
 bool FSkeletalMeshEditorPanel::LoadMesh(const FString& Path)
 {
+	const fs::path RelativePath = fs::relative(Path, "Assets");
 	FString Error;
-	USkeletalMesh* Mesh = UAssetManager::Get().LoadFbxSkeletalMesh(Path, Path, Error);
+	USkeletalMesh* Mesh = UAssetManager::Get().LoadFbxSkeletalMesh(RelativePath.generic_string(), Path, Error);
 	if (!Mesh || !PreviewMeshComponent)
 	{
 		HTR_LOG(Error, "{}", Error);
