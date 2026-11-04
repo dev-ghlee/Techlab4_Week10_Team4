@@ -53,6 +53,8 @@ private:
 	void Redo();
 
 	void SyncPoseToComponent();
+	void ApplyPoseToAsset();
+	void SavePoseToFile();
 
 	UWorld* PreviewWorld = nullptr;
 	FEditorViewportClient ViewportClient;

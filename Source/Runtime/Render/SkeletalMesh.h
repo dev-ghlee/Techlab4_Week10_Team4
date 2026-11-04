@@ -31,6 +31,11 @@ public:
 		return MeshData.RefSkeleton;
 	}
 
+	void SetRefSkeleton(const FReferenceSkeleton& InRefSkeleton)
+	{
+		MeshData.RefSkeleton = InRefSkeleton;
+	}
+
 	// 슬롯의 실제 재질을 반환한다. 없으면 기본 재질을 반환한다.
 	UMaterial* GetMaterial(uint32 SlotIndex) const;
 

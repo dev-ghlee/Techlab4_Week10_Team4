@@ -23,6 +23,8 @@
 #include <limits>
 #include <utility>
 
+#include "FbxImporter/SkeletalPoseFile.h"
+
 
 namespace
 {
@@ -673,6 +675,16 @@ USkeletalMesh* UAssetManager::LoadFbxSkeletalMesh(const FString& Key, const FStr
 	if (!FFbxImporter::LoadScene(Path, MeshData, OutError))
 	{
 		return nullptr;
+	}
+
+	const FString PosePath = fs::path(Path).replace_extension(".pose").generic_string();
+	if (fs::exists(PosePath))
+	{
+		FString PoseError;
+		if (!LoadPoseFile(MeshData, PosePath, PoseError))
+		{
+			HTR_LOG(Warning, "Failed to load pose override for '{}': {}", Path, PoseError);
+		}
 	}
 
 	// 현재 객체의 private 생성 함수를 호출한다.

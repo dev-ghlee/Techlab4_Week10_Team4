@@ -5,6 +5,7 @@
 #include "Editor/Settings/SettingsPanel.h"
 #include "Engine/World.h"
 #include "Asset/AssetManager.h"
+#include "Asset/FbxImporter/SkeletalPoseFile.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/SkyLightComponent.h"
@@ -187,10 +188,29 @@ void FSkeletalMeshEditorPanel::OnRender()
 
 	bool bPanelOpen = IsOpen();
 	bFocused = false;
-	if (ImGui::Begin(GetPanelName(), &bPanelOpen))
+	if (ImGui::Begin(GetPanelName(), &bPanelOpen, ImGuiWindowFlags_MenuBar))
 	{
 		SetOpen(bPanelOpen);
 		TickShortcut();
+
+		if (ImGui::BeginMenuBar())
+		{
+			if (ImGui::BeginMenu("File"))
+			{
+				if (ImGui::MenuItem("Apply To Asset", "Ctrl+S"))
+				{
+					ApplyPoseToAsset();
+				}
+				if (ImGui::MenuItem("Save Pose File...", "Ctrl+Shift+S"))
+				{
+					SavePoseToFile();
+				}
+
+				ImGui::EndMenu();
+			}
+
+			ImGui::EndMenuBar();
+		}
 
 		if (ImGui::BeginTable("##SkeletalMeshEditorLayout", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV))
 		{
@@ -345,6 +365,10 @@ void FSkeletalMeshEditorPanel::TickShortcut()
 	else if (IO.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y))
 	{
 		Redo();
+	}
+	else if (IO.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S))
+	{
+		IO.KeyShift ? SavePoseToFile() : ApplyPoseToAsset();
 	}
 }
 
@@ -725,5 +749,29 @@ void FSkeletalMeshEditorPanel::SyncPoseToComponent()
 		{
 			PreviewMeshComponent->SetBoneLocalTransform(Index, PreviewPose.LocalPose[Index]);
 		}
+	}
+}
+
+void FSkeletalMeshEditorPanel::ApplyPoseToAsset()
+{
+	USkeletalMesh* Mesh = PreviewMeshComponent ? PreviewMeshComponent->GetSkeletalMesh() : nullptr;
+	if (!Mesh)
+	{
+		return;
+	}
+
+	ReferenceSkeleton.RawRefBonePose = PreviewPose.LocalPose;
+	Mesh->SetRefSkeleton(ReferenceSkeleton);
+}
+
+void FSkeletalMeshEditorPanel::SavePoseToFile()
+{
+	ApplyPoseToAsset();
+
+	const FString PosePath = fs::path(CurrentAssetPath).replace_extension(".pose").generic_string();
+	FString Error;
+	if (!SavePoseFile(ReferenceSkeleton, PreviewPose.LocalPose, PosePath, Error))
+	{
+		HTR_LOG(Error, "Failed to save pose file '{}': {}", PosePath, Error);
 	}
 }
