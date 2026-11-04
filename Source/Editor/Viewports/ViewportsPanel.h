@@ -6,6 +6,7 @@
 #include <functional>
 
 class FGameViewportClient;
+class USkeletalMesh;
 
 class FViewportsPanel : public IEditorPanel {
 public:
@@ -60,8 +61,13 @@ public:
 	}
 
 	void SetShowNoCamera(bool bValue) { bShowNoCamera = bValue; }
+	void SetSkeletalMeshDropCallback(std::function<void(USkeletalMesh*, int32, const FVector2&)> Callback)
+	{
+		OnDropSkeletalMesh = Callback;
+	}
 
 private:
+	std::function<void(USkeletalMesh*, int32, const FVector2&)> OnDropSkeletalMesh;
 	int32 ActiveViewIndex = 0;
 	bool bShowNoCamera = false;
 

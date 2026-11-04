@@ -35,7 +35,7 @@ protected:
 
 private:
 	// 리소스 변경은 자세 초기화를 위해 SetSkeletalMesh를 거친다.
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY(EditAnywhere)
 	USkeletalMesh* SkeletalMesh = nullptr;
 	TUniquePtr<FSkeletalMeshObject> MeshObject;
 };

@@ -50,6 +50,7 @@
 
 #include "Components/ShapeComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/Actor/SkeletalMeshActor.h"
 
 #include "Physics/Collision.h"
 
@@ -184,6 +185,28 @@ bool UEditorEngine::Init()
 	ContentDrawerPanel->SetCreateWidgetCallback([this](const FString& Path) { UIEditorPanel->NewAsset(Path); });
 	ContentDrawerPanel->SetOpenWidgetCallback([this](const FString& Path) { UIEditorPanel->OpenAsset(Path); });
 	ContentDrawerPanel->SetOpenSkeletalCallback([this](const FString& Path) { SkeletalMeshEditorPanel->OpenAsset(Path); });
+	ViewportsPanel->SetSkeletalMeshDropCallback([this](USkeletalMesh* Mesh, int32 ViewIndex, const FVector2& Mouse)
+	{
+		if (!Mesh || PlayWorld || !EditorWorld) return;
+		FEditorViewportClient* Client = ViewportsPanel->GetViewportClient(ViewIndex);
+		if (!Client) return;
+		const FRay Ray = Client->DeprojectScreenToWorld(Mouse);
+		FTransform Transform;
+		FHitResult Hit;
+		float GroundDistance = 0.0f;
+		if (EditorWorld->LineTraceSingle(Ray, Hit))
+			Transform.Location = Hit.ImpactPoint;
+		else if (RayIntersectsPlane(Ray, FVector::ZeroVector, FVector(0, 0, 1), GroundDistance)
+			&& GroundDistance >= 0.0f)
+			Transform.Location = Ray.PointAt(GroundDistance);
+		else
+			Transform.Location = Ray.PointAt(10.0f);
+
+		ASkeletalMeshActor* Actor = EditorWorld->SpawnActor<ASkeletalMeshActor>(NAME_None, &Transform);
+		if (!Actor) return;
+		Actor->GetSkeletalMeshComponent()->SetSkeletalMesh(Mesh);
+		OutlinerPanel->SelectActor(Actor);
+	});
 
 	Outline = MakeUnique<FOutline>();
 

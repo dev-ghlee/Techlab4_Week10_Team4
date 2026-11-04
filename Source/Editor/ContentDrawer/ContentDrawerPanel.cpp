@@ -2,6 +2,7 @@
 #include "Editor/ContentDrawer/ContentDrawerPanel.h"
 #include "Asset/AssetManager.h"
 #include "Text/Font.h"
+#include "Render/SkeletalMesh.h"
 #include "Editor/HitoriEd/EditorDragDrop.h"
 
 bool FContentDrawerPanel::Init()
@@ -170,6 +171,25 @@ void FContentDrawerPanel::OnRender()
 
 					ImGui::TextUnformatted(FilenameString.c_str());
 
+					ImGui::EndDragDropSource();
+				}
+				if (!bIsDirectory && (Path.extension() == ".fbx" || Path.extension() == ".FBX")
+					&& ImGui::BeginDragDropSource())
+				{
+					// 시작 시 로드한 에셋과 같은 키를 사용해 공유 리소스를 재사용한다.
+					const FString Key = Path.lexically_relative(AssetRootPath).generic_string();
+					FString LoadError;
+					USkeletalMesh* Mesh = UAssetManager::Get().LoadFbxSkeletalMesh(Key, PathString, LoadError);
+					if (Mesh)
+					{
+						ImGui::SetDragDropPayload(EditorDragDrop::SkeletalMesh, &Mesh, sizeof(Mesh));
+						ImGui::TextUnformatted(FilenameString.c_str());
+						ImGui::TextUnformatted("Drop into a viewport or SkeletalMesh slot");
+					}
+					else
+					{
+						ImGui::TextWrapped("%s", LoadError.c_str());
+					}
 					ImGui::EndDragDropSource();
 				}
 				// 더블 클릭 이벤트 처리

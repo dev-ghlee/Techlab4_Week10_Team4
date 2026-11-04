@@ -1,6 +1,8 @@
 #include "EnginePCH.h"
 #include "Editor/Viewports/ViewportsPanel.h"
 #include "Engine/GameViewportClient.h"
+#include "Editor/HitoriEd/EditorDragDrop.h"
+#include "imgui_internal.h"
 
 #include "Core/StatOverlay.h"
 #include "Core/Stats/LightweightStats.h"
@@ -188,6 +190,23 @@ void FViewportsPanel::OnRender() {
 			continue;
 
 		DrawList->AddImage(DisplayTarget->GetSRV(), ViewMin, ViewMax);
+
+		// DrawList 이미지에는 Item이 없으므로 각 View의 실제 사각형을 타깃으로 쓴다.
+		if (!GameViewportClient && OnDropSkeletalMesh && ImGui::BeginDragDropTargetCustom(
+			ImRect(ViewMin, ViewMax), ImGui::GetID(Client)))
+		{
+			if (const ImGuiPayload* Payload = ImGui::AcceptDragDropPayload(EditorDragDrop::SkeletalMesh))
+			{
+				if (Payload->DataSize == sizeof(USkeletalMesh*))
+				{
+					const ImVec2 Mouse = ImGui::GetMousePos();
+					ActiveViewIndex = ViewIndex;
+					OnDropSkeletalMesh(*static_cast<USkeletalMesh* const*>(Payload->Data), ViewIndex,
+						FVector2(Mouse.x - ViewMin.x, Mouse.y - ViewMin.y));
+				}
+			}
+			ImGui::EndDragDropTarget();
+		}
 
 		// 마우스 클릭 시 활성 뷰포트 설정
 		const bool bViewHovered = bHovered && ImGui::IsMouseHoveringRect(ViewMin, ViewMax);

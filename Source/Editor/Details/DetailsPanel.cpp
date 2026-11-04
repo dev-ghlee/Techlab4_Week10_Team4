@@ -6,6 +6,7 @@
 #include "Editor/HitoriEd/EditorDragDrop.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Components/ParticleSubUVComponent.h"
 #include "Components/SpotLightComponent.h"
@@ -345,6 +346,46 @@ namespace
 				ImGui::PopID();
 				if (bSelected)
 					ImGui::SetItemDefaultFocus();
+			}
+			ImGui::EndCombo();
+		}
+	}
+
+	void DrawSkeletalMeshSlot(UObject* Owner, USkeletalMesh** MeshPtr)
+	{
+		USkeletalMesh* Current = *MeshPtr;
+		auto AssignMesh = [Owner, MeshPtr](USkeletalMesh* Mesh)
+		{
+			if (USkeletalMeshComponent* Component = Cast<USkeletalMeshComponent>(Owner))
+				Component->SetSkeletalMesh(Mesh);
+			else
+				*MeshPtr = Mesh;
+		};
+
+		ImGui::SetNextItemWidth(-1.0f);
+		const FString DisplayName = Current ? GetAssetDisplayName(Current->GetPath()) : "None";
+		const bool bOpen = ImGui::BeginCombo("##SkeletalMesh", DisplayName.c_str());
+		if (ImGui::IsItemHovered() && Current)
+			ImGui::SetTooltip("%s", Current->GetPath().c_str());
+		if (ImGui::BeginDragDropTarget())
+		{
+			if (const ImGuiPayload* Payload = ImGui::AcceptDragDropPayload(EditorDragDrop::SkeletalMesh))
+				if (Payload->DataSize == sizeof(USkeletalMesh*))
+					AssignMesh(*static_cast<USkeletalMesh* const*>(Payload->Data));
+			ImGui::EndDragDropTarget();
+		}
+		if (bOpen)
+		{
+			if (ImGui::Selectable("None", Current == nullptr)) AssignMesh(nullptr);
+			for (TObjectIterator<USkeletalMesh> Itr; Itr; ++Itr)
+			{
+				const bool bSelected = *Itr == Current;
+				const FString Path = Itr->GetPath();
+				ImGui::PushID(*Itr);
+				if (ImGui::Selectable(GetAssetDisplayName(Path).c_str(), bSelected)) AssignMesh(*Itr);
+				if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", Path.c_str());
+				if (bSelected) ImGui::SetItemDefaultFocus();
+				ImGui::PopID();
 			}
 			ImGui::EndCombo();
 		}
@@ -778,6 +819,10 @@ namespace
 			else if (Property.Class == UStaticMesh::StaticClass())
 			{
 				DrawMeshSlot(Object, reinterpret_cast<UStaticMesh**>(ObjPtr));
+			}
+			else if (Property.Class == USkeletalMesh::StaticClass())
+			{
+				DrawSkeletalMeshSlot(Object, reinterpret_cast<USkeletalMesh**>(ObjPtr));
 			}
 			break;
 		}
