@@ -2,6 +2,7 @@
 #include "Editor/ContentDrawer/ContentDrawerPanel.h"
 #include "Asset/AssetManager.h"
 #include "Text/Font.h"
+#include "Render/Mesh.h"
 #include "Render/SkeletalMesh.h"
 #include "Editor/HitoriEd/EditorDragDrop.h"
 
@@ -203,9 +204,33 @@ void FContentDrawerPanel::OnRender()
 					{
 						OnOpenWidget(PathString);
 					}
-					else if ((Path.extension() == ".fbx" || Path.extension() == ".FBX") && OnOpenSkeletal)
+					else if (Path.extension() == ".fbx" || Path.extension() == ".FBX")
 					{
-						OnOpenSkeletal(PathString);
+						// ScanAssets에서 등록한 것과 같은 Assets 기준 상대 경로를 사용한다.
+						const FString Key = Path.lexically_relative(AssetRootPath).generic_string();
+						URenderAsset* Asset = UAssetManager::GetAssetByPath<URenderAsset>(Key);
+
+						if (!Asset)
+						{
+							HTR_LOG(Warning, "FBX asset is not loaded: {}", Key);
+						}
+						else if (Asset->IsA<USkeletalMesh>())
+						{
+							// 실제 SkeletalMesh일 때만 해당 편집기를 연다.
+							if (OnOpenSkeletal)
+							{
+								OnOpenSkeletal(PathString);
+							}
+						}
+						else if (Asset->IsA<UStaticMesh>())
+						{
+							// StaticMesh 전용 편집기를 추가하면 이 분기에 연결한다.
+							HTR_LOG(Info, "StaticMesh selected '{}': no dedicated editor is available.", Key);
+						}
+						else
+						{
+							HTR_LOG(Warning, "Unexpected asset type for FBX: {}", Key);
+						}
 					}
 				}
 				// 파일 이름 표시

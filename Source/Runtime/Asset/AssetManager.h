@@ -72,6 +72,9 @@ public:
 	USoundWave* LoadSound(const FString& Path);
 	static UStaticMesh* LoadObjStaticMesh(const FString& Path);
 
+	// FBX에서 StaticMesh를 생성하고 Key로 등록한다.
+	UStaticMesh* LoadFbxStaticMesh(const FString& Key, const FString& Path, FString& OutError);
+
 	// Key는 조회 및 등록 식별자이고 Path는 실제 FBX 파일 경로다.
 	USkeletalMesh* LoadFbxSkeletalMesh(const FString& Key, const FString& Path, FString& OutError);
 

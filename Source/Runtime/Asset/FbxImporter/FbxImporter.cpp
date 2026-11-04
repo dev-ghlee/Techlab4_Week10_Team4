@@ -5,6 +5,7 @@
 #include "Containers/Map.h"
 #include "Math/Quat.h"
 #include "Render/SkeletalMeshData.h"
+#include "Render/StaticMeshData.h"
 
 #include <algorithm>
 #include <cmath>
@@ -59,7 +60,7 @@ struct FImportContext
 	TArray<FbxMatrix> BoneBindGlobals;
 
 	// Scene 공간에서 루트의 위치·회전을 기준으로 하는 공간으로 변환한다.
-	// 크기를 변경하지 않으므로 Scene의 cm 단위와 원본 스케일을 유지한다.
+	// 크기를 변경하지 않으므로 Scene의 m 단위와 원본 스케일을 유지한다.
 	FbxMatrix SceneToSkeletal;
 
 	// 각 Mesh의 Control Point를 루트 기준 공간으로 변환하는 행렬.
@@ -698,22 +699,12 @@ bool FFbxImporter::ValidateSkeletalMeshData(const FSkeletalMeshData& MeshData, F
 	return true;
 }
 
-bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FString& OutError)
+bool FFbxImporter::LoadFbxScene(FbxManager& Manager, const FString& Path, FbxScene*& OutScene, FString& OutError)
 {
-	OutError.clear();
-
-	// 함수가 끝나면 Manager의 Destroy()를 자동으로 호출한다.
-	FbxAutoDestroyPtr<FbxManager> Manager(FbxManager::Create());
-	if (!Manager)
-	{
-		OutError = "Failed to create FBX manager.";
-		return false;
-	}
-
-	// Manager가 소유하므로 Manager 정리 시 함께 해제된다.
-	FbxIOSettings* IOSettings = FbxIOSettings::Create(Manager.Get(), IOSROOT);
-	FbxScene* Scene = FbxScene::Create(Manager.Get(), "ImportScene");
-	FbxImporter* Importer = FbxImporter::Create(Manager.Get(), "Importer");
+	// 생성한 SDK 객체는 Manager가 소유하고 정리한다.
+	FbxIOSettings* IOSettings = FbxIOSettings::Create(&Manager, IOSROOT);
+	FbxScene* Scene = FbxScene::Create(&Manager, "ImportScene");
+	FbxImporter* Importer = FbxImporter::Create(&Manager, "Importer");
 
 	if (!IOSettings || !Scene || !Importer)
 	{
@@ -721,62 +712,91 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 		return false;
 	}
 
-	Manager->SetIOSettings(IOSettings);
+	Manager.SetIOSettings(IOSettings);
 
-	// 파일을 열고 형식을 자동 판별한 뒤 내용을 Scene으로 읽는다.
-	if (!Importer->Initialize(Path.c_str(), -1, IOSettings)
-		|| !Importer->Import(Scene))
+	// 파일 형식을 자동 판별하고 Scene의 계층과 데이터를 읽는다.
+	if (!Importer->Initialize(Path.c_str(), -1, IOSettings) || !Importer->Import(Scene))
 	{
 		OutError = Importer->GetStatus().GetErrorString();
 		return false;
 	}
 
-	// 이후 계층 순회를 시작할 최상위 Node를 확인한다.
 	if (!Scene->GetRootNode())
 	{
 		OutError = "FBX scene has no root node.";
 		return false;
 	}
 
-	// 엔진 축: 오른쪽 +Y, 위쪽 +Z, 전방 +X.
+	OutScene = Scene;
+	return true;
+}
+
+bool FFbxImporter::ConvertAndTriangulateScene(FbxManager& Manager, FbxScene& Scene, FString& OutError)
+{
 	// SDK 문자열 순서는 오른쪽 / 위쪽 / 화면 안쪽 방향이다.
+	// 엔진 기준: 오른쪽 +Y, 위쪽 +Z, 전방 +X.
 	FbxAxisSystem EngineAxis;
 	if (!FbxAxisSystem::ParseAxisSystem("yzx", EngineAxis))
 	{
 		OutError = "Failed to define the engine axis system.";
-		
 		return false;
 	}
 
 	// 좌표계가 다를 때 변환하며 좌우 손잡이 변경도 처리한다.
-	if (Scene->GetGlobalSettings().GetAxisSystem() != EngineAxis)
+	if (Scene.GetGlobalSettings().GetAxisSystem() != EngineAxis)
 	{
-		EngineAxis.DeepConvertScene(Scene);
+		EngineAxis.DeepConvertScene(&Scene);
 	}
 
-	// 엔진 길이 단위를 센티미터로 통일한다.
-	const FbxSystemUnit& EngineUnit = FbxSystemUnit::cm;
-	if (Scene->GetGlobalSettings().GetSystemUnit() != EngineUnit)
+	// 엔진 길이 단위를 미터로 통일한다.
+	const FbxSystemUnit& EngineUnit = FbxSystemUnit::m;
+	if (Scene.GetGlobalSettings().GetSystemUnit() != EngineUnit)
 	{
 		// 기본 옵션을 사용해 Cluster의 바인드 정보도 함께 변환한다.
-		EngineUnit.ConvertScene(Scene);
+		EngineUnit.ConvertScene(&Scene);
 	}
 
 	// Scene의 지원 가능한 Geometry를 삼각형화한다.
 	// true: 기존 Geometry를 삼각형화한 결과로 교체한다.
 	// false: 구형 삼각형화 방식을 사용하지 않는다.
-	FbxGeometryConverter GeometryConverter(Manager.Get());
+	FbxGeometryConverter GeometryConverter(&Manager);
 
-	if (!GeometryConverter.Triangulate(Scene, true, false))
+	if (!GeometryConverter.Triangulate(&Scene, true, false))
 	{
 		OutError = "Failed to triangulate FBX scene.";
+		return false;
+	}
+
+	return true;
+}
+
+bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FString& OutError)
+{
+	OutError.clear();
+
+	// Manager가 함수 종료 시 자신과 소유한 SDK 객체를 정리한다.
+	FbxAutoDestroyPtr<FbxManager> Manager(FbxManager::Create());
+	if (!Manager)
+	{
+		OutError = "Failed to create FBX manager.";
+		return false;
+	}
+
+	FbxScene* Scene = nullptr;
+	if (!LoadFbxScene(*Manager.Get(), Path, Scene, OutError))
+	{
+		return false;
+	}
+
+	if (!ConvertAndTriangulateScene(*Manager.Get(), *Scene, OutError))
+	{
 		return false;
 	}
 
 	// 변환 후 노드가 실제로 사용하는 메시를 수집한다.
 	// Scene의 전체 Geometry 목록에는 노드에서 사용하지 않는 원본도 있을 수 있다.
 	FImportContext Context;
-	LoadSceneRecursive(Scene->GetRootNode(), Context);
+	CollectMeshNodesRecursive(Scene->GetRootNode(), Context.MeshNodes);
 
 	if (Context.MeshNodes.IsEmpty())
 	{
@@ -1809,7 +1829,462 @@ bool FFbxImporter::LoadScene(const FString& Path, FSkeletalMeshData& OutData, FS
 	return true;
 }
 
-void FFbxImporter::LoadSceneRecursive(FbxNode* Node, FImportContext& Context)
+bool FFbxImporter::DetectMeshType(const FString& Path, EFbxMeshType& OutType, FString& OutError)
+{
+	OutError.clear();
+
+	// 판별에 사용하는 SDK 객체의 수명을 관리한다.
+	FbxAutoDestroyPtr<FbxManager> Manager(FbxManager::Create());
+	if (!Manager)
+	{
+		OutError = "Failed to create FBX manager.";
+		return false;
+	}
+
+	FbxScene* Scene = nullptr;
+	if (!LoadFbxScene(*Manager.Get(), Path, Scene, OutError))
+	{
+		return false;
+	}
+
+	// 실제 임포트와 동일하게 Geometry를 변환한 뒤 판별한다.
+	if (!ConvertAndTriangulateScene(*Manager.Get(), *Scene, OutError))
+	{
+		return false;
+	}
+
+	TArray<FbxNode*> MeshNodes;
+	CollectMeshNodesRecursive(Scene->GetRootNode(), MeshNodes);
+	if (MeshNodes.IsEmpty())
+	{
+		OutError = "FBX scene contains no mesh nodes to import.";
+		return false;
+	}
+
+	EFbxMeshType MeshType = EFbxMeshType::StaticMesh;
+	for (FbxNode* MeshNode : MeshNodes)
+	{
+		FbxMesh* Mesh = MeshNode->GetMesh();
+
+		// 하나라도 Skin이 연결되어 있으면 파일 전체를 SkeletalMesh로 분류한다.
+		if (Mesh->GetDeformerCount(FbxDeformer::eSkin) > 0)
+		{
+			MeshType = EFbxMeshType::SkeletalMesh;
+			break;
+		}
+	}
+
+	OutType = MeshType;
+	return true;
+}
+
+bool FFbxImporter::LoadStaticMesh(const FString& Path, FStaticMeshData& OutData, FString& OutError)
+{
+	OutError.clear();
+
+	// 이번 임포트에서 사용하는 SDK 객체의 수명을 관리한다.
+	FbxAutoDestroyPtr<FbxManager> Manager(FbxManager::Create());
+	if (!Manager)
+	{
+		OutError = "Failed to create FBX manager.";
+		return false;
+	}
+
+	FbxScene* Scene = nullptr;
+	if (!LoadFbxScene(*Manager.Get(), Path, Scene, OutError))
+	{
+		return false;
+	}
+
+	if (!ConvertAndTriangulateScene(*Manager.Get(), *Scene, OutError))
+	{
+		return false;
+	}
+
+	// 변환과 재질을 함께 읽을 수 있도록 Mesh Node를 수집한다.
+	TArray<FbxNode*> MeshNodes;
+	CollectMeshNodesRecursive(Scene->GetRootNode(), MeshNodes);
+	if (MeshNodes.IsEmpty())
+	{
+		OutError = "FBX scene contains no mesh nodes to import.";
+		return false;
+	}
+
+	TMap<FbxNode*, FbxMatrix> MeshToStaticMatrices;
+	for (FbxNode* MeshNode : MeshNodes)
+	{
+		FbxMesh* Mesh = MeshNode->GetMesh();
+		if (Mesh->GetDeformerCount(FbxDeformer::eSkin) > 0)
+		{
+			OutError = std::format("FBX mesh '{}' contains skin deformers.", MeshNode->GetName());
+			return false;
+		}
+
+		for (int32 PolygonIndex = 0; PolygonIndex < Mesh->GetPolygonCount(); ++PolygonIndex)
+		{
+			if (Mesh->GetPolygonSize(PolygonIndex) != 3)
+			{
+				OutError = std::format("FBX mesh '{}' contains a non-triangle polygon.", MeshNode->GetName());
+				return false;
+			}
+		}
+
+		// 이 노드의 Geometry에만 적용되는 추가 변환을 구성한다.
+		FbxAMatrix Geometry;
+		Geometry.SetTRS(
+			MeshNode->GetGeometricTranslation(FbxNode::eSourcePivot),
+			MeshNode->GetGeometricRotation(FbxNode::eSourcePivot),
+			MeshNode->GetGeometricScaling(FbxNode::eSourcePivot));
+
+		// 부모 계층까지 포함한 기본 배치에 Geometry 변환을 결합한다.
+		const FbxAMatrix NodeGlobal = MeshNode->EvaluateGlobalTransform();
+		const FbxMatrix MeshToStatic = FbxMatrix(NodeGlobal) * FbxMatrix(Geometry);
+		MeshToStaticMatrices.Add(MeshNode, MeshToStatic);
+	}
+
+	// 추출 결과를 임시로 조립하고 마지막에 OutData로 이동한다.
+	FStaticMeshData ImportedData;
+	TMap<FbxSurfaceMaterial*, uint32> MaterialIndexMap;
+	TMap<FbxNode*, TArray<uint32>> MeshMaterialIndices;
+
+	// 재질이 없는 메시와 비어 있는 재질 항목에서 사용할 슬롯이다.
+	FStaticMaterialSlot DefaultSlot;
+	DefaultSlot.Name = "DefaultMaterial";
+	const uint32 DefaultMaterialIndex = ImportedData.MaterialSlots.Add(DefaultSlot);
+
+	for (FbxNode* MeshNode : MeshNodes)
+	{
+		const int32 MaterialCount = MeshNode->GetMaterialCount();
+		TArray<uint32>& MaterialIndices = MeshMaterialIndices.FindOrAdd(MeshNode);
+
+		// 재질이 없는 노드도 기본 슬롯을 가리키는 항목 하나를 갖는다.
+		MaterialIndices.Init(DefaultMaterialIndex, std::max(MaterialCount, 1));
+		for (int32 LocalMaterialIndex = 0; LocalMaterialIndex < MaterialCount; ++LocalMaterialIndex)
+		{
+			FbxSurfaceMaterial* Material = MeshNode->GetMaterial(LocalMaterialIndex);
+			if (!Material)
+			{
+				continue;
+			}
+
+			// 같은 SDK 재질을 공유하는 노드는 기존 전체 슬롯을 재사용한다.
+			if (const uint32* ExistingIndex = MaterialIndexMap.Find(Material))
+			{
+				MaterialIndices[LocalMaterialIndex] = *ExistingIndex;
+				continue;
+			}
+
+			FStaticMaterialSlot Slot;
+			Slot.Name = Material->GetName();
+			const FbxProperty Diffuse = Material->FindProperty(FbxSurfaceMaterial::sDiffuse);
+			const FbxProperty Normal = Material->FindProperty(FbxSurfaceMaterial::sNormalMap);
+
+			if (!ReadMaterialBaseColor(Material, Slot.BaseColor, OutError))
+			{
+				return false;
+			}
+
+			if (!ReadMaterialTexturePath(Diffuse, Path, Slot.DiffuseTexturePath, OutError))
+			{
+				return false;
+			}
+
+			if (!ReadMaterialTexturePath(Normal, Path, Slot.NormalTexturePath, OutError, true))
+			{
+				return false;
+			}
+
+			// 노드의 로컬 재질 번호를 전체 재질 슬롯과 연결한다.
+			const uint32 SlotIndex = ImportedData.MaterialSlots.Add(Slot);
+			MaterialIndexMap.Add(Material, SlotIndex);
+			MaterialIndices[LocalMaterialIndex] = SlotIndex;
+		}
+	}
+
+	// PolygonIndex * 3 + CornerIndex와 최종 정점 인덱스의 대응표다.
+	TMap<FbxNode*, TArray<uint32>> MeshPolygonVertexIndices;
+	for (FbxNode* MeshNode : MeshNodes)
+	{
+		FbxMesh* Mesh = MeshNode->GetMesh();
+		const FbxMatrix* MeshToStatic = MeshToStaticMatrices.Find(MeshNode);
+		if (!Mesh || !MeshToStatic)
+		{
+			OutError = "Failed to resolve mesh import data.";
+			return false;
+		}
+
+		// 원본 위치는 Control Point에서, 노멀과 UV는 Polygon 꼭짓점에서 읽는다.
+		const int32 ControlPointCount = Mesh->GetControlPointsCount();
+		const FbxVector4* ControlPoints = Mesh->GetControlPoints();
+		if (ControlPointCount <= 0 || !ControlPoints)
+		{
+			OutError = "FBX mesh has no valid control points.";
+			return false;
+		}
+
+		// 비균일 스케일에서도 노멀 방향을 보존하도록 역전치 행렬을 만든다.
+		FMatrix NormalMatrix;
+		if (!BuildNormalMatrix(*MeshToStatic, NormalMatrix, OutError))
+		{
+			return false;
+		}
+
+		if (Mesh->GetElementNormalCount() == 0 && !Mesh->GenerateNormals(false, false, false))
+		{
+			OutError = "Failed to generate mesh normals.";
+			return false;
+		}
+
+		// 현재 정점 구조는 UV 하나를 저장하므로 첫 번째 UV 세트를 사용한다.
+		FbxStringList UVSetNames;
+		Mesh->GetUVSetNames(UVSetNames);
+		const char* UVSetName = UVSetNames.GetCount() > 0 ? UVSetNames.GetStringAt(0) : nullptr;
+
+		for (int32 LocalMaterialIndex = 0; LocalMaterialIndex < MeshNode->GetMaterialCount(); ++LocalMaterialIndex)
+		{
+			FbxSurfaceMaterial* Material = MeshNode->GetMaterial(LocalMaterialIndex);
+			if (!Material)
+			{
+				continue;
+			}
+
+			const uint32* SlotIndex = MaterialIndexMap.Find(Material);
+			if (!SlotIndex || *SlotIndex >= static_cast<uint32>(ImportedData.MaterialSlots.Num()))
+			{
+				OutError = "Failed to resolve material slot for UV validation.";
+				return false;
+			}
+
+			const FStaticMaterialSlot& Slot = ImportedData.MaterialSlots[*SlotIndex];
+			const FbxProperty Diffuse = Material->FindProperty(FbxSurfaceMaterial::sDiffuse);
+			const FbxProperty Normal = Material->FindProperty(FbxSurfaceMaterial::sNormalMap);
+			if (!ValidateMaterialTextureUVSet(Diffuse, *Mesh, UVSetName, OutError))
+			{
+				return false;
+			}
+
+			// 기본 노멀 텍스처를 사용한다면 원본 노멀맵의 UV 검사를 생략한다.
+			if (!Slot.NormalTexturePath.empty() && !ValidateMaterialTextureUVSet(Normal, *Mesh, UVSetName, OutError))
+			{
+				return false;
+			}
+		}
+
+		// 꼭짓점별 정점을 합친 결과가 TArray의 int32 개수 범위에 들어야 한다.
+		const int32 PolygonCount = Mesh->GetPolygonCount();
+		const int64 AddedVertexCount = static_cast<int64>(PolygonCount) * 3;
+		const int64 TotalVertexCount = static_cast<int64>(ImportedData.Vertices.Num()) + AddedVertexCount;
+		if (TotalVertexCount > std::numeric_limits<int32>::max())
+		{
+			OutError = "Static mesh contains too many vertices.";
+			return false;
+		}
+
+		TArray<uint32>& PolygonVertexIndices = MeshPolygonVertexIndices.FindOrAdd(MeshNode);
+		PolygonVertexIndices.Reserve(static_cast<int32>(AddedVertexCount));
+		for (int32 PolygonIndex = 0; PolygonIndex < PolygonCount; ++PolygonIndex)
+		{
+			for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+			{
+				const int32 ControlPointIndex = Mesh->GetPolygonVertex(PolygonIndex, CornerIndex);
+				if (ControlPointIndex < 0 || ControlPointIndex >= ControlPointCount)
+				{
+					OutError = "Mesh control point index is out of range.";
+					return false;
+				}
+
+				// 위치에는 Geometry와 노드 계층의 변환을 함께 적용한다.
+				const FbxVector4 Position = MeshToStatic->MultNormalize(ControlPoints[ControlPointIndex]);
+				FbxVector4 SourceNormal;
+				if (!Mesh->GetPolygonVertexNormal(PolygonIndex, CornerIndex, SourceNormal))
+				{
+					OutError = "Failed to read a polygon vertex normal.";
+					return false;
+				}
+
+				FVertex Vertex;
+				FVector LocalNormal;
+				for (int32 Component = 0; Component < 3; ++Component)
+				{
+					if (!IsWithinFloatRange(Position[Component]) || !IsWithinFloatRange(SourceNormal[Component]))
+					{
+						OutError = "Mesh position or normal exceeds the engine numeric range.";
+						return false;
+					}
+
+					Vertex.Position[Component] = static_cast<float>(Position[Component]);
+					LocalNormal[Component] = static_cast<float>(SourceNormal[Component]);
+				}
+
+				// 노멀에는 이동을 제외한 역전치 변환을 적용하고 길이를 1로 맞춘다.
+				const FVector TransformedNormal = NormalMatrix.TransformVector(LocalNormal);
+				const double NormalLength = std::hypot(
+					static_cast<double>(TransformedNormal.X),
+					static_cast<double>(TransformedNormal.Y),
+					static_cast<double>(TransformedNormal.Z));
+				if (!std::isfinite(NormalLength) || NormalLength <= 1e-8)
+				{
+					OutError = "Transformed mesh normal has an invalid length.";
+					return false;
+				}
+
+				for (int32 Component = 0; Component < 3; ++Component)
+				{
+					Vertex.Normal[Component] = static_cast<float>(TransformedNormal[Component] / NormalLength);
+				}
+
+				// UV가 없으면 기본값 (0, 0)을 사용한다.
+				if (UVSetName)
+				{
+					FbxVector2 SourceUV;
+					bool bUnmapped = false;
+					if (!Mesh->GetPolygonVertexUV(PolygonIndex, CornerIndex, UVSetName, SourceUV, bUnmapped) || bUnmapped)
+					{
+						OutError = "Failed to read a polygon vertex UV.";
+						return false;
+					}
+
+					// 기존 임포트 경로처럼 V 방향을 뒤집는다.
+					const double U = SourceUV[0];
+					const double V = 1.0 - SourceUV[1];
+					if (!IsWithinFloatRange(U) || !IsWithinFloatRange(V))
+					{
+						OutError = "Mesh UV exceeds the engine numeric range.";
+						return false;
+					}
+
+					Vertex.UV = FVector2(static_cast<float>(U), static_cast<float>(V));
+				}
+
+				// 꼭짓점마다 정점을 생성해 UV 경계와 하드 엣지를 보존한다.
+				// 정점 색상은 FVertex의 기본값인 흰색을 사용한다.
+				const uint32 VertexIndex = ImportedData.Vertices.Add(Vertex);
+				PolygonVertexIndices.Add(VertexIndex);
+			}
+		}
+	}
+
+	// 같은 재질을 사용하는 삼각형 인덱스를 하나의 배열에 모은다.
+	TArray<TArray<uint32>> IndicesByMaterial;
+	IndicesByMaterial.SetNum(ImportedData.MaterialSlots.Num());
+	for (FbxNode* MeshNode : MeshNodes)
+	{
+		FbxMesh* Mesh = MeshNode->GetMesh();
+		const TArray<uint32>* PolygonVertexIndices = MeshPolygonVertexIndices.Find(MeshNode);
+		const TArray<uint32>* MaterialIndices = MeshMaterialIndices.Find(MeshNode);
+		const FbxMatrix* MeshToStatic = MeshToStaticMatrices.Find(MeshNode);
+		if (!Mesh || !PolygonVertexIndices || !MaterialIndices || !MeshToStatic)
+		{
+			OutError = "Failed to resolve mesh index construction data.";
+			return false;
+		}
+
+		const int32 PolygonCount = Mesh->GetPolygonCount();
+		const int64 ExpectedVertexCount = static_cast<int64>(PolygonCount) * 3;
+		if (PolygonVertexIndices->Num() != ExpectedVertexCount)
+		{
+			OutError = "Polygon vertex index count does not match the mesh.";
+			return false;
+		}
+
+		// SDK 변환 후의 순서를 기준으로 추가 반사 변환의 감기 방향을 보정한다.
+		const bool bReverseWinding = MeshToStatic->Determinant() < 0.0;
+		for (int32 PolygonIndex = 0; PolygonIndex < PolygonCount; ++PolygonIndex)
+		{
+			int32 LocalMaterialIndex = 0;
+			if (!ReadPolygonMaterialIndex(*Mesh, PolygonIndex, LocalMaterialIndex, OutError))
+			{
+				return false;
+			}
+
+			// 미할당 재질(-1)은 기본 슬롯을 사용한다.
+			uint32 MaterialSlotIndex = DefaultMaterialIndex;
+			if (LocalMaterialIndex >= 0)
+			{
+				if (!MaterialIndices->IsValidIndex(LocalMaterialIndex))
+				{
+					OutError = "Polygon material index is outside the mesh material table.";
+					return false;
+				}
+
+				MaterialSlotIndex = (*MaterialIndices)[LocalMaterialIndex];
+			}
+
+			if (MaterialSlotIndex >= static_cast<uint32>(IndicesByMaterial.Num()))
+			{
+				OutError = "Polygon material slot index is out of range.";
+				return false;
+			}
+
+			uint32 TriangleIndices[3];
+			for (int32 CornerIndex = 0; CornerIndex < 3; ++CornerIndex)
+			{
+				const int32 PolygonVertexIndex = PolygonIndex * 3 + CornerIndex;
+				TriangleIndices[CornerIndex] = (*PolygonVertexIndices)[PolygonVertexIndex];
+				if (TriangleIndices[CornerIndex] >= static_cast<uint32>(ImportedData.Vertices.Num()))
+				{
+					OutError = "Triangle references an invalid static mesh vertex.";
+					return false;
+				}
+			}
+
+			// 반사 변환이면 두 번째와 세 번째 인덱스를 교환한다.
+			TArray<uint32>& MaterialTriangleIndices = IndicesByMaterial[MaterialSlotIndex];
+			MaterialTriangleIndices.Add(TriangleIndices[0]);
+			MaterialTriangleIndices.Add(TriangleIndices[bReverseWinding ? 2 : 1]);
+			MaterialTriangleIndices.Add(TriangleIndices[bReverseWinding ? 1 : 2]);
+		}
+	}
+
+	ImportedData.Indices.Reserve(ImportedData.Vertices.Num());
+	for (int32 MaterialSlotIndex = 0; MaterialSlotIndex < IndicesByMaterial.Num(); ++MaterialSlotIndex)
+	{
+		const TArray<uint32>& MaterialTriangleIndices = IndicesByMaterial[MaterialSlotIndex];
+		if (MaterialTriangleIndices.IsEmpty())
+		{
+			continue;
+		}
+
+		// 재질별 삼각형을 연속 구간으로 합치고 Section에 그 범위를 저장한다.
+		FStaticMeshSection Section;
+		Section.StartIndex = static_cast<uint32>(ImportedData.Indices.Num());
+		Section.IndexCount = static_cast<uint32>(MaterialTriangleIndices.Num());
+		Section.MaterialSlotIndex = static_cast<uint32>(MaterialSlotIndex);
+		ImportedData.Indices.Append(MaterialTriangleIndices);
+		ImportedData.Sections.Add(Section);
+	}
+
+	if (ImportedData.Vertices.IsEmpty())
+	{
+		OutError = "Static mesh contains no vertices.";
+		return false;
+	}
+
+	// 첫 정점으로 시작해 원점이 불필요하게 범위에 포함되지 않도록 한다.
+	FBox Bounds;
+	Bounds.Min = ImportedData.Vertices[0].Position;
+	Bounds.Max = Bounds.Min;
+	for (const FVertex& Vertex : ImportedData.Vertices)
+	{
+		for (int32 Component = 0; Component < 3; ++Component)
+		{
+			Bounds.Min[Component] = std::min(Bounds.Min[Component], Vertex.Position[Component]);
+			Bounds.Max[Component] = std::max(Bounds.Max[Component], Vertex.Position[Component]);
+		}
+	}
+	ImportedData.AABB = Bounds;
+
+	if (!ImportedData.Validate(OutError))
+	{
+		return false;
+	}
+
+	// 완성된 배열의 소유권을 넘겨 불필요한 복사를 피한다.
+	OutData = std::move(ImportedData);
+	return true;
+}
+
+void FFbxImporter::CollectMeshNodesRecursive(FbxNode* Node, TArray<FbxNode*>& OutMeshNodes)
 {
 	if (!Node)
 	{
@@ -1819,12 +2294,12 @@ void FFbxImporter::LoadSceneRecursive(FbxNode* Node, FImportContext& Context)
 	// 빈 메시 노드는 렌더링 대상이 아니다. Transform과 재질을 읽기 위해 Node를 보관한다.
 	if (FbxMesh* Mesh = Node->GetMesh(); Mesh && Mesh->GetPolygonCount() > 0)
 	{
-		Context.MeshNodes.Add(Node);
+		OutMeshNodes.Add(Node);
 	}
 
 	// 현재 Node에 Mesh가 없어도 자식 탐색은 계속한다.
 	for (int32 ChildIndex = 0; ChildIndex < Node->GetChildCount(); ++ChildIndex)
 	{
-		LoadSceneRecursive(Node->GetChild(ChildIndex), Context);
+		CollectMeshNodesRecursive(Node->GetChild(ChildIndex), OutMeshNodes);
 	}
 }

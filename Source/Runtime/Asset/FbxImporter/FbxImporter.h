@@ -2,24 +2,31 @@
 
 #include "Core/EngineString.h"
 #include "Core/Types.h"
+#include "Containers/Array.h"
 
 struct FSkeletalMeshData;
+struct FStaticMeshData;
 struct FTransform;
 struct FVector4;
 struct FMatrix;
 
-// Node 목록과 본 인덱스 대응표 등의 임시 정보. 정의는 cpp에 둔다.
-struct FImportContext;
-
 // SDK 전체를 헤더에 Include하지 않도록 전방 선언한다.
 namespace fbxsdk
 {
+	class FbxManager;
+	class FbxScene;
 	class FbxNode;
 	class FbxMatrix;
 	class FbxMesh;
 	class FbxSurfaceMaterial;
 	class FbxProperty;
 }
+
+enum class EFbxMeshType
+{
+	StaticMesh,
+	SkeletalMesh
+};
 
 class FFbxImporter
 {
@@ -28,7 +35,19 @@ public:
 	// 실패 시 OutError에 원인을 기록하며 기존 OutData는 유지한다.
 	static bool LoadScene(const FString& Path, FSkeletalMeshData& OutData, FString& OutError);
 
+	// FBX의 Mesh Node들을 하나의 StaticMesh 데이터로 구성한다.
+	static bool LoadStaticMesh(const FString& Path, FStaticMeshData& OutData, FString& OutError);
+
+	// 메시의 Skin 연결 여부를 기준으로 임포트할 타입을 판별한다.
+	static bool DetectMeshType(const FString& Path, EFbxMeshType& OutType, FString& OutError);
+
 private:
+	// FBX 파일을 읽고 Manager가 소유하는 Scene을 생성한다.
+	static bool LoadFbxScene(fbxsdk::FbxManager& Manager, const FString& Path, fbxsdk::FbxScene*& OutScene, FString& OutError);
+
+	// 엔진 좌표계와 m 단위로 변환하고 Geometry를 삼각형화한다.
+	static bool ConvertAndTriangulateScene(fbxsdk::FbxManager& Manager, fbxsdk::FbxScene& Scene, FString& OutError);
+
 	// NaN과 무한대를 제외하고 float의 값 범위에 들어가는지 확인한다.
 	static bool IsWithinFloatRange(double Value);
 
@@ -59,6 +78,6 @@ private:
 	// 조립된 임포트 결과의 배열 대응과 참조 관계를 검사한다.
 	static bool ValidateSkeletalMeshData(const FSkeletalMeshData& MeshData, FString& OutError);
 
-	// 현재 Node에서 필요한 대상을 수집하고 자식마다 재귀 호출한다.
-	static void LoadSceneRecursive(fbxsdk::FbxNode* Node, FImportContext& Context);
+	// 노드 계층을 재귀적으로 순회하며 비어 있지 않은 Mesh Node를 수집한다.
+	static void CollectMeshNodesRecursive(fbxsdk::FbxNode* Node, TArray<fbxsdk::FbxNode*>& OutMeshNodes);
 };

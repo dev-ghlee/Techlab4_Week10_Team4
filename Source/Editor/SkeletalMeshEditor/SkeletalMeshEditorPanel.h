@@ -53,6 +53,8 @@ private:
 	void Redo();
 
 	void SyncPoseToComponent();
+	void ApplyPoseToAsset();
+	void SavePoseToFile();
 
 	UWorld* PreviewWorld = nullptr;
 	FEditorViewportClient ViewportClient;
@@ -68,6 +70,7 @@ private:
 	bool bRenderMesh = true;
 	bool bRenderBones = true;
 
+	FString CurrentAssetPath;
 	FReferenceSkeleton ReferenceSkeleton;
 	USkeletalMeshComponent* PreviewMeshComponent = nullptr;
 	FSkeletalPose PreviewPose;
