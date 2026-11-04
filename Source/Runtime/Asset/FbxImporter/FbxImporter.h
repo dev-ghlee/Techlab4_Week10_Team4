@@ -45,7 +45,7 @@ private:
 	// FBX 파일을 읽고 Manager가 소유하는 Scene을 생성한다.
 	static bool LoadFbxScene(fbxsdk::FbxManager& Manager, const FString& Path, fbxsdk::FbxScene*& OutScene, FString& OutError);
 
-	// 엔진 좌표계와 cm 단위로 변환하고 Geometry를 삼각형화한다.
+	// 엔진 좌표계와 m 단위로 변환하고 Geometry를 삼각형화한다.
 	static bool ConvertAndTriangulateScene(fbxsdk::FbxManager& Manager, fbxsdk::FbxScene& Scene, FString& OutError);
 
 	// NaN과 무한대를 제외하고 float의 값 범위에 들어가는지 확인한다.

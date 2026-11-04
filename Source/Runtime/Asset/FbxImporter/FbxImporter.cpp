@@ -60,7 +60,7 @@ struct FImportContext
 	TArray<FbxMatrix> BoneBindGlobals;
 
 	// Scene 공간에서 루트의 위치·회전을 기준으로 하는 공간으로 변환한다.
-	// 크기를 변경하지 않으므로 Scene의 cm 단위와 원본 스케일을 유지한다.
+	// 크기를 변경하지 않으므로 Scene의 m 단위와 원본 스케일을 유지한다.
 	FbxMatrix SceneToSkeletal;
 
 	// 각 Mesh의 Control Point를 루트 기준 공간으로 변환하는 행렬.
@@ -748,8 +748,8 @@ bool FFbxImporter::ConvertAndTriangulateScene(FbxManager& Manager, FbxScene& Sce
 		EngineAxis.DeepConvertScene(&Scene);
 	}
 
-	// 엔진 길이 단위를 센티미터로 통일한다.
-	const FbxSystemUnit& EngineUnit = FbxSystemUnit::cm;
+	// 엔진 길이 단위를 미터로 통일한다.
+	const FbxSystemUnit& EngineUnit = FbxSystemUnit::m;
 	if (Scene.GetGlobalSettings().GetSystemUnit() != EngineUnit)
 	{
 		// 기본 옵션을 사용해 Cluster의 바인드 정보도 함께 변환한다.
