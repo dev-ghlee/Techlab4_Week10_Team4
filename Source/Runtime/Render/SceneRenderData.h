@@ -40,6 +40,12 @@ struct FRenderStats
 	uint32 CascadeViewsRedrawn = 0;
 	uint32 CascadeViewsCached = 0;
 
+	uint32 DecalCount = 0;
+	uint32 VisibleDecalCount = 0;
+	uint32 DecalReceivers = 0;
+	uint32 DecalDrawCalls = 0;
+	float DecalPassTimeMs = 0.0f;
+
 	void Reset() { *this = FRenderStats(); }
 };
 

@@ -2,6 +2,7 @@
 
 #include "PrimitiveSceneProxy.h"
 #include "LightSceneProxy.h"
+#include "DecalSceneProxy.h"
 #include "Components/BillboardComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/LightComponent.h"
@@ -84,4 +85,13 @@ private:
 	uint64 ShadowOldestVersion = 0;
 
 	std::unordered_map<FString, TUniquePtr<FSkyLightEnvironment>> SkyLightEnvironments;
+
+	TArray<FDecalSceneProxy*> DecalProxies;
+
+public:
+	void AddDecal(UDecalComponent* InComponent);
+	void RemoveDecal(UDecalComponent* InComponent);
+	void RemoveAllDecals();
+
+	const TArray<FDecalSceneProxy*> GetDecalProxies() { return DecalProxies; };
 };

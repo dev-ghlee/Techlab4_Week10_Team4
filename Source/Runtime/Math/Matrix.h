@@ -7,6 +7,8 @@ struct FVector;
 struct FVector4;
 struct FRotator;
 
+struct FQuat;
+
 // Row Vector sys
 struct FMatrix {
 	float M[4][4];
@@ -96,6 +98,8 @@ std::ostream& operator << (std::ostream& OS, const FMatrix& M);
 
 FRotator MatrixToRotator(const FMatrix& M);
 FMatrix LookAt(const FVector& Eye, const FVector& Center, const FVector& Up);
+
+FMatrix GetViewMatrix(const FQuat& Rotation, const FVector& Location);
 
 // NOTE: FOV는 라디안 단위로 줄것
 FMatrix Perspective(float Fov, float Aspect, float Near, float Far);

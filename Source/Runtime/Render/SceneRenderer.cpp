@@ -20,12 +20,16 @@
 #include "Render/PostProcess/ToneMapData.h"
 #include "Text/TextRenderer.h"
 #include "UObject/UObjectIterator.h"
+#include "Math/Box.h"
+#include "Components/DecalComponent.h"
+#include "Physics/Collision.h"
 
 #include <cmath>
 #include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <utility>
+#include <chrono>
 
 DECLARE_CYCLE_STAT("Frustum Cull", STAT_FrustumCull);
 DECLARE_CYCLE_STAT("Gather Elements", STAT_GatherElements);
@@ -55,6 +59,27 @@ namespace
 		ERenderGraphLoadAction DepthLoad = ERenderGraphLoadAction::Load)
 	{
 		return !Draw || Graph.AddRasterPass(MakeViewportPass(Name, Color, Depth, DepthLoad), Draw);
+	}
+
+	float ComputeBoundScreenSize(const FVector& Center, float Radius, const FSceneView& View)
+	{
+		if(!View.bIsPerspective)
+		{
+			return View.OrthoWidth > 0.0f ? (Radius * 2.0f) / View.OrthoWidth : 1.0f;
+		}
+		
+		float Dist = (Center - View.ViewLocation).Length();
+		Dist = FMath::Max(Dist, 0.001f);
+
+		float YScale = View.ProjectionMatrix.M[2][1];
+		if(YScale <= 0.0f)
+		{
+			float HalfFOVRad = (View.FieldOfView * 0.5f) * (PI / 180.0f);
+			YScale = 1.0f / std::tan(HalfFOVRad);
+		}
+
+		float ScreenRadius = (Radius / Dist) * YScale;
+		return ScreenRadius * 2.0f;
 	}
 }
 
@@ -151,6 +176,238 @@ void FSceneRenderer::RenderSceneText(FRenderer* Renderer)
 }
 
 // 가시성 검사 및 렌더 큐 수집
+void FSceneRenderer::CollectDecalReceivers(const FDecalSceneProxy* Decal, TArray<FPrimitiveSceneProxy*>& OutReceivers)
+{
+	if(!World || !Decal)
+	{
+		return;
+	}
+
+	World->GetScene().BVH.Query(
+		[ & ](const FBox& Bounds)
+		{
+			return Decal->WorldBounds.Intersects(Bounds);
+		},
+		[ & ](FPrimitiveSceneProxy* Proxy)
+		{
+			if(!Proxy || !Proxy->IsReceivesDecals())
+			{
+				return;
+			}
+
+			const FAABB& B = Proxy->GetBounds();
+			FWorldBox MeshBox;
+			MeshBox.Center = B.Center;
+			MeshBox.Extent = B.Extent;
+			MeshBox.Axis[0] = FVector(1.0f, 0.0f, 0.0f);
+			MeshBox.Axis[1] = FVector(0.0f, 1.0f, 0.0f);
+			MeshBox.Axis[2] = FVector(0.0f, 0.0f, 1.0f);
+
+			if(FCollision::BoxBox(MeshBox, Decal->WorldOBB))
+			{
+				OutReceivers.Add(Proxy);
+			}
+		}
+	);
+}
+
+bool FSceneRenderer::AddDecalPass(FRenderGraphBuilder& Graph, FRenderer* Renderer, FRenderGraphTextureRef HDRTarget, FRenderGraphTextureRef DepthTarget, const FSceneRenderOptions& Options, FRenderGraphTextureRef ForwardShadowMask)
+{
+	if(!World || !Renderer)
+	{
+		return false;
+	}
+
+	if(!Options.bShowDecal)
+	{
+		return true;
+	}
+
+	FScene& Scene = World->GetScene();
+	const auto& Decals = Scene.GetDecalProxies();
+	if(Decals.IsEmpty())
+	{
+		return true;
+	}	
+
+	FRenderGraphRasterPassDesc PassDesc = MakeViewportPass("DecalPass", HDRTarget, DepthTarget);
+
+	if(ForwardShadowMask)
+	{
+		PassDesc.ReadTextures.push_back(ForwardShadowMask);
+	}
+
+	return Graph.AddRasterPass(std::move(PassDesc), [ this, Renderer, &Graph, ForwardShadowMask, Options ]()
+		{
+			BindForwardLighting(Renderer, Options, ForwardShadowMask ? Graph.Resolve(ForwardShadowMask) : nullptr);
+			RenderDecals(Renderer);
+			UnbindForwardLighting(Renderer);
+		});
+}
+
+void FSceneRenderer::RenderDecals(FRenderer* Renderer)
+{
+	const auto StartTime = std::chrono::high_resolution_clock::now();
+
+	if(!World || !Renderer)
+	{
+		return;
+	}
+
+	FScene& Scene = World->GetScene();
+	const auto& AllDecals = Scene.GetDecalProxies();
+	RenderData.RenderStats.DecalCount = AllDecals.Num();
+
+	// Get active decals that are visible and should be drawn
+	TArray<const FDecalSceneProxy*> ActiveDecals;
+	for(const FDecalSceneProxy* Decal : AllDecals)
+	{
+		if(Decal && Decal->DrawInGame)
+		{
+			ActiveDecals.Add(Decal);
+		}
+	}
+
+	if(ActiveDecals.IsEmpty())
+	{
+		return;
+	}
+
+	RenderData.RenderStats.VisibleDecalCount = ActiveDecals.Num();
+
+	// Sort decals by sort order
+	std::sort(ActiveDecals.begin(), ActiveDecals.end(),
+		[](const FDecalSceneProxy* A, const FDecalSceneProxy* B)
+		{
+			return A->SortOrder < B->SortOrder;
+		});
+
+	// Sset up pipeline state for decal rendering
+	static FPipelineState DecalPipeline;
+	static bool bPipelineInitialized = false;
+	if(!bPipelineInitialized)
+	{
+		DecalPipeline.Shader = FRenderResourceManager::GetShaderProgram("Resources/Shader/ForwardDecal.hlsl");
+		DecalPipeline.Topology = EPrimitiveTopology::TriangleList;
+		DecalPipeline.RasterizerState = ERasterizerState::SolidBack;
+		DecalPipeline.BlendState = EBlendState::AlphaBlend;
+		DecalPipeline.DepthStencilState = EDepthStencilState::ReadOnly;
+		bPipelineInitialized = true;
+	}
+	if(!DecalPipeline.Shader || !DecalPipeline.Shader->VertexShader || !DecalPipeline.Shader->PixelShader)
+	{
+		return;
+	}
+	RenderCommand::BindPipelineState(DecalPipeline);
+
+	Renderer->UploadViewMatrix(View.ViewProjectionMatrix);
+	RenderCommand::BindConstantBuffer(4, Renderer->GetViewConstants(), EShaderBindFlagBits::Vertex);
+
+	RenderCommand::BindSamplerState(0, ESamplerState::LinearClamp, EShaderBindFlagBits::Pixel);
+
+	FConstantBuffer* DecalCB = Renderer->GetDecalConstants();
+	FConstantBuffer* ObjectCB = Renderer->GetObjectConstants();
+	if(!DecalCB || !ObjectCB)
+	{
+		return;
+	}
+
+	TArray<FPrimitiveSceneProxy*> Receivers;
+	for(const FDecalSceneProxy* Decal : ActiveDecals)
+	{
+		// Screen size fading
+		float ScreenFadeAlpha = 1.0f;
+		if(Decal->FadeScreenSize > 0.0f)
+		{
+			float SphereRadius = Decal->WorldOBB.Extent.Length();
+			float ScreenSize = ComputeBoundScreenSize(Decal->WorldOBB.Center, SphereRadius, View);
+
+			if(ScreenSize < Decal->FadeScreenSize * 0.5f)
+			{
+				continue;
+			}
+			else if(ScreenSize < Decal->FadeScreenSize)
+			{
+				ScreenFadeAlpha = (ScreenSize - Decal->FadeScreenSize * 0.5f) / (Decal->FadeScreenSize * 0.5f);
+			}
+		}
+
+		Receivers.Reset();
+		CollectDecalReceivers(Decal, Receivers);
+		RenderData.RenderStats.DecalReceivers += Receivers.Num();
+
+		if(Receivers.IsEmpty())
+		{
+			continue;
+		}
+
+		// Update decal constant buffer
+		FDecalConstants DecalData;
+		DecalData.DecalViewProjection = Decal->DecalViewProjection;
+		DecalData.DecalColor = Decal->DecalColor.ToVector4();
+		float CurrentTime = (World && World->IsGameWorld()) ? World->GetTimeSeconds() : 0.0f;
+		if(World && World->IsGameWorld())
+		{
+			DecalData.DecalColor.W *= Decal->GetFadeAlpha(CurrentTime);
+		}
+		DecalData.DecalColor.W *= ScreenFadeAlpha;
+
+		FVector DecalForward = FVector(Decal->DecalToWorld.M[0][0], Decal->DecalToWorld.M[0][1], Decal->DecalToWorld.M[0][2]).Normalized();
+		DecalData.DecalForward = FVector4(DecalForward, 0.0f);
+
+		RenderCommand::UpdateBufferData(DecalCB, &DecalData, sizeof(DecalData));
+		RenderCommand::BindConstantBuffer(2, DecalCB, EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);
+
+		// Decal texture binding
+		if(Decal->DecalMaterial && !Decal->DecalMaterial->Textures.IsEmpty())
+		{
+			RenderCommand::BindShaderResource(0, Decal->DecalMaterial->Textures[0], EShaderBindFlagBits::Pixel);			
+		}
+		else
+		{
+			RenderCommand::BindShaderResource(0, static_cast<UTexture2D*>(nullptr), EShaderBindFlagBits::Pixel); // Null texture if no decal material or texture
+		}
+		// Decal normal map binding
+		if(Decal->DecalMaterial && Decal->DecalMaterial->Textures.Num() > 1)
+		{
+			RenderCommand::BindShaderResource(1, Decal->DecalMaterial->Textures[1], EShaderBindFlagBits::Pixel);
+		}
+		else
+		{
+			RenderCommand::BindShaderResource(1, static_cast<UTexture2D*>(nullptr), EShaderBindFlagBits::Pixel); // Null texture if no normal map
+		}
+		
+
+		// Render decals for each receiver
+		for(FPrimitiveSceneProxy* Receiver : Receivers)
+		{
+			UStaticMesh* Mesh = Receiver->GetMesh();
+			if(!Mesh)
+			{
+				continue;
+			}
+
+			FMatrix LocalToWorld = Receiver->GetLocalToWorld();
+			RenderCommand::UpdateBufferData(ObjectCB, &LocalToWorld, sizeof(FMatrix));
+			RenderCommand::BindConstantBuffer(0, ObjectCB, EShaderBindFlagBits::Vertex);
+
+			RenderCommand::BindMesh(Mesh, 0);			
+
+			const auto& Sections = Mesh->GetMeshData().Sections;
+			for(const auto& Section : Sections)
+			{			
+				RenderCommand::DrawIndexed(Section.IndexCount,Section.StartIndex);
+				RenderData.RenderStats.DecalDrawCalls++;
+			}
+		}
+	}
+
+	RenderCommand::BindShaderResource(0, static_cast<UTexture2D*>(nullptr), EShaderBindFlagBits::Pixel);
+	RenderCommand::BindShaderResource(1, static_cast<UTexture2D*>(nullptr), EShaderBindFlagBits::Pixel);
+
+	RenderData.RenderStats.DecalPassTimeMs = std::chrono::duration<float, std::milli>(std::chrono::high_resolution_clock::now() - StartTime).count();
+}
+
 void FSceneRenderer::InitViews(FRenderer* Renderer, const FSceneRenderOptions& Options)
 {
 	bLightUploadSucceeded = false;
@@ -369,6 +626,8 @@ bool FSceneRenderer::AddCorePasses(FRenderGraphBuilder& Graph, FRenderer* Render
 			})) return false;
 	}
 
+	FRenderGraphTextureRef ForwardShadowMask{};
+
 	if (Options.RenderingPath == ERenderingPath::Deferred) // Deferred rendering
 	{
 		const FRenderGraphTextureDesc GBufferDesc{ Width, Height, ETextureFormat::R8G8B8A8_UNorm };
@@ -550,7 +809,6 @@ bool FSceneRenderer::AddCorePasses(FRenderGraphBuilder& Graph, FRenderer* Render
 		}
 
 		// 그림자 광원마다 배정된 채널(R~A)에 Projection한다. 한 픽셀에서 겹치는 그림자 광원은 서로 다른 채널을 받는다.
-		FRenderGraphTextureRef ForwardShadowMask{};
 		if (bForwardShadows)
 		{
 			ForwardShadowMask = Graph.CreateTexture({ Width, Height, ETextureFormat::R8G8B8A8_UNorm }, "ScreenShadowMask");
@@ -612,6 +870,11 @@ bool FSceneRenderer::AddCorePasses(FRenderGraphBuilder& Graph, FRenderer* Render
 		})) return false;
 	}
 
+	if(!AddDecalPass(Graph, Renderer, LightingHDR, Depth, Options, ForwardShadowMask))
+	{
+		return false;
+	}
+
 	FRenderGraphRasterPassDesc ToneMap{};
 	ToneMap.Name = "ToneMap";
 	ToneMap.ReadTextures = { LightingHDR };
@@ -658,7 +921,7 @@ bool FSceneRenderer::AddViewportPasses(FRenderGraphBuilder& Graph, FRenderer* Re
 	}
 	if (!AddCorePasses(Graph, Renderer, Targets, CoreOptions, Skybox)) // 기본적으로 그려져야 되는 Core Pass 들
 		return false;
-	
+
 	const FRenderGraphTextureRef SceneColor = Graph.ImportTexture(Targets.SceneColor.get(), "SceneColor");
 	const FRenderGraphTextureRef Depth = Graph.ImportTexture(Targets.Depth.get(), "SceneDepth");
 	if (!SceneColor || !Depth) return false;

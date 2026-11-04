@@ -50,6 +50,7 @@
 
 #include "Components/ShapeComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/DecalComponent.h"
 #include "GameFramework/Actor/SkeletalMeshActor.h"
 
 #include "Physics/Collision.h"
@@ -1087,6 +1088,7 @@ void UEditorEngine::BuildSceneRenderOptions(FGameViewportClient* ViewClient, FSc
 	Options.DisplayGamma = S.DisplayGamma;
 	Options.bShowVignette = S.bShowVignette;
 	Options.bShowCameraOverlay = S.bShowCameraOverlay;
+	Options.bShowDecal = S.bShowDecal;
 }
 
 void UEditorEngine::BuildSceneRenderOptions(FEditorViewportClient* ViewClient, bool IsPIE, FSceneRenderOptions& Options)
@@ -1111,6 +1113,7 @@ void UEditorEngine::BuildSceneRenderOptions(FEditorViewportClient* ViewClient, b
 	Options.DisplayGamma = S.DisplayGamma;
 	Options.bShowVignette = S.bShowVignette;
 	Options.bShowCameraOverlay = S.bShowCameraOverlay;
+	Options.bShowDecal = S.bShowDecal;
 
 	Options.bDrawPrimitives = IsPIE || SettingsPanel->GetSettings().bDrawPrimitives;
 	Options.bEnableFog = ViewClient->GetViewportMode() == EViewportMode::Solid;
@@ -1358,6 +1361,7 @@ void UEditorEngine::RenderFrame(FEditorViewportClient* ViewClient,
 
 						DrawCollisionShapes(EditorWorld, LineBatcher.get(), SelectedActor);
 						DrawSpringArms(EditorWorld, LineBatcher.get(), SelectedActor);
+						DrawDebugDecal(EditorWorld, LineBatcher.get(), SelectedActor);
 
 						LineBatcher->OnRender(SceneView.ViewProjectionMatrix);
 					};

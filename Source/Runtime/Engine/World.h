@@ -112,6 +112,7 @@ public:
 
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 
+	float GetTimeSeconds() const { return TimeSeconds; }
 
 	using Super::Serialize;
 	virtual void Serialize(FStructuredArchive::FRecord Record) override;

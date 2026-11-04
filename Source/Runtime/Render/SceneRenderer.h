@@ -16,6 +16,7 @@ class FTexture2D;
 class FSkyboxRenderer;
 struct FSceneViewTargets;
 struct FLightSceneInfo;
+struct FDecalSceneProxy;
 
 // 에디터는 실행할 작업만 제공한다. 패스 생성과 순서는 FSceneRenderer가 결정한다.
 struct FSceneOverlayCallbacks
@@ -135,7 +136,6 @@ private:
 	bool RenderHeightFog(FRenderer* Renderer, FTexture2D* DepthTarget, FTexture2D* ColorTarget);
 	void RenderSceneText(FRenderer* Renderer);
 
-
 	UWorld* World = nullptr;
 	FSceneView View;
 	FSceneRenderData& RenderData;
@@ -146,4 +146,10 @@ private:
 	bool bCorePassSucceeded = true;
 	bool bFXAAPassSucceeded = true;
 	bool bHasFog = false;
+
+private:
+	void CollectDecalReceivers(const FDecalSceneProxy* Decal, TArray<FPrimitiveSceneProxy*>& OutReceivers);
+	bool AddDecalPass(FRenderGraphBuilder& Graph, FRenderer* Renderer, FRenderGraphTextureRef HDRTarget, FRenderGraphTextureRef DepthTarget, const FSceneRenderOptions& Options, FRenderGraphTextureRef ForwardShadowMask);
+	void RenderDecals(FRenderer* Renderer);
+
 };

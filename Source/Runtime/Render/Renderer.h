@@ -50,7 +50,10 @@ public:
 	FTextRenderer* GetSceneText() const { return SceneText.get(); }
 
 	FConstantBuffer* GetToneMapConstants() const { return ToneMapConstants.get(); }
-	
+	FConstantBuffer* GetDecalConstants() const { return DecalCB.get(); }
+	FConstantBuffer* GetObjectConstants() const { return ObjectCB.get(); }
+	FConstantBuffer* GetViewConstants() const { return ViewCB.get(); }
+
 private:
 	void EnsurePerObjectSlotCapacity(uint32 SlotCount);
 	void BindBatch(const FMeshDrawBatch& Batch);
@@ -60,6 +63,7 @@ private:
 	TUniquePtr<FConstantBuffer> MaterialCB;
 	TUniquePtr<FConstantBuffer> PerObjectSlotCB;
 	TUniquePtr<FConstantBuffer> ToneMapConstants;
+	TUniquePtr<FConstantBuffer> DecalCB;
 	uint32 PerObjectSlotCapacity = 0;
 	bool bUsePerObjectSlots = false;
 	TArray<ComPtr<ID3D11Query>> OcclusionQueries;

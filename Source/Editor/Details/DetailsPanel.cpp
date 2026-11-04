@@ -169,8 +169,10 @@ namespace
 		return isChanged;
 	}
 
-	void DrawTextureSlot(UMaterial** MaterialPtr, int32 SlotIndex)
+	bool DrawTextureSlot(UMaterial** MaterialPtr, int32 SlotIndex)
 	{
+		bool bIsChanged = false;
+
 		const float ThumbnailSize = 64.0f;
 
 		UMaterial* Material = *MaterialPtr;
@@ -223,7 +225,8 @@ namespace
 					}
 
 					Material->Textures[SlotIndex] = DroppedTexture;
-					Texture = DroppedTexture;
+					Texture = DroppedTexture; 
+					bIsChanged = true;
 				}
 			}
 			ImGui::EndDragDropTarget();
@@ -245,6 +248,8 @@ namespace
 		ImGui::EndGroup();
 
 		ImGui::PopID();
+
+		return bIsChanged;
 	}
 
 	FString GetAssetDisplayName(const FString& Path)
@@ -810,7 +815,7 @@ namespace
 
 			if (Property.Class == UMaterial::StaticClass())
 			{
-				DrawTextureSlot(reinterpret_cast<UMaterial**>(ObjPtr), 0);
+				bChanged  = DrawTextureSlot(reinterpret_cast<UMaterial**>(ObjPtr), 0);
 			}
 			else if (Property.Class == UFont::StaticClass())
 			{

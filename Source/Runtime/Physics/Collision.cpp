@@ -4,6 +4,8 @@
 #include "Components/SphereComponent.h"
 #include "Components/CapsuleComponent.h"
 
+#include "Math/Box.h"
+
 namespace
 {
 	FVector Row(const FMatrix& M, int32 R) { return FVector(M.M[R][0], M.M[R][1], M.M[R][2]); }

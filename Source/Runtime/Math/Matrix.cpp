@@ -399,6 +399,16 @@ FMatrix LookAt(const FVector& Eye, const FVector& Center, const FVector& Up)
 	return Translation * Rotation;
 }
 
+FMatrix GetViewMatrix(const FQuat& Rotation, const FVector& Location)
+{
+	FMatrix RotationMatrix = Rotation.ToFMatrix();
+
+	FMatrix InverseTranslation = FMatrix::MakeTranslation(Location * -1.0f);
+	FMatrix InverseRotation = RotationMatrix.GetTransposed();
+
+	return InverseTranslation * InverseRotation;
+}
+
 FMatrix Perspective(float Fov, float Aspect, float Near, float Far)
 {
 	const float HalfFOV = Fov * 0.5f;

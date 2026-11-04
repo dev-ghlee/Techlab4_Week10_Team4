@@ -27,6 +27,7 @@ bool FRenderer::Init()
 	ObjectCB = RenderCommand::CreateConstantBuffer(sizeof(FForwardObjectConstants));
 	ViewCB = RenderCommand::CreateConstantBuffer(sizeof(FMatrix));
 	MaterialCB = RenderCommand::CreateConstantBuffer(sizeof(FForwardMaterialConstants));
+	DecalCB = RenderCommand::CreateConstantBuffer(sizeof(FDecalConstants));
 	if (!ObjectCB || !ViewCB || !MaterialCB) return false;
 	GPUOcclusion.Init();
 	return true;
