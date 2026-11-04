@@ -53,6 +53,7 @@ void FDecalSceneProxy::UpdateRenderState()
 
 	DecalMaterial = Component->GetDecalMaterial();
 	DecalColor = Component->DecalColor;
+	bIsEmissive = Component->bIsEmissive;
 	SortOrder = Component->SortOrder;
 	FadeScreenSize = Component->FadeScreenSize;
 	InvFadeDuration = Component->FadeDuration > 0.0f  ? 1.0f / Component->FadeDuration : 0.0f;

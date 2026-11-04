@@ -385,14 +385,24 @@ float4 mainPS(PSInput input) : SV_TARGET
     float4 DecalColorSample = DecalTexture.Sample(ClampSampler, DecalUV);
     float3 DecalAlbedo = pow(max(DecalColorSample.rgb, 0.0f), 2.2f) * DecalColor.rgb;
     
-    // Perturbed surface normal from decal normal map
-    float3 ShadingNormal = GetDecalShadingNormal(input, DecalUV);
+    float3 FinalColor;
+    if (DecalForward.w > 0.5f)
+    {
+        // Emissive / Unlit decal (e.g., Fake Spot Light): shines even without scene lights
+        FinalColor = DecalAlbedo;
+    }
+    else
+    {
+        // Perturbed surface normal from decal normal map
+        float3 ShadingNormal = GetDecalShadingNormal(input, DecalUV);
+        
+        // Calculate full forward tiled lighting
+        FLightResult LitResult = CalculateTiledLighting(input.Position.xyz, input.WorldPosition, input.ViewDepth, ShadingNormal, true);
+        
+        // Combine diffuse and specular
+        FinalColor = (DecalAlbedo * LitResult.Diffuse) + LitResult.Specular;
+    }
     
-    // Calculate full forward tiled lighting
-    FLightResult LitResult = CalculateTiledLighting(input.Position.xyz, input.WorldPosition, input.ViewDepth, ShadingNormal, true);
-    
-    // Combine diffuse and specular
-    float3 FinalColor = (DecalAlbedo * LitResult.Diffuse) + LitResult.Specular;
     float FinalAlpha = DecalColorSample.a * DecalColor.a * FadeZ;
     
     return float4(FinalColor, FinalAlpha);
