@@ -10,7 +10,7 @@ namespace
 	{
 		if (Selected)
 		{
-			return { 0.87f, 0.56f, 0.13f, Alpha };
+			return { 0.87f, 0.56f, 0.13f, 1.0f };
 		}
 		return { 0.3f, 0.31f, 0.41f, Alpha };
 	}

@@ -412,6 +412,7 @@ void FSkeletalMeshEditorPanel::SetSkeleton(const FReferenceSkeleton& Skeleton)
 	PreviewPose.Skeleton = &ReferenceSkeleton;
 	PreviewPose.Reset();
 
+	Children.Reset();
 	Children.SetNum(ReferenceSkeleton.RawRefBoneInfo.Num());
 	for (int32 BoneIndex = 0; BoneIndex < ReferenceSkeleton.RawRefBoneInfo.Num(); ++BoneIndex)
 	{
