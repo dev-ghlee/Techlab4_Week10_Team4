@@ -470,6 +470,16 @@ const FRenderStats& Stats = RenderData.RenderStats;
 		}
 	}
 
+	if(FStatOverlay::IsEnabled(EStatFlags::Decal))
+	{
+		Lines.Add({ "Decal", TitleColor });
+		Lines.Add({ std::format("  Total Decals {} ", Stats.DecalCount), ValueColor });
+		Lines.Add({ std::format("  Visible Decals {} ", Stats.VisibleDecalCount), ValueColor });
+		Lines.Add({ std::format("  Receivers {} ", Stats.DecalReceivers), ValueColor });
+		Lines.Add({ std::format("  Draw Calls {} ", Stats.DecalDrawCalls), ValueColor });
+		Lines.Add({ std::format("  Pass Time {:.2f} ms", Stats.DecalPassTimeMs), ValueColor });
+	}
+
 	if (Lines.Num() == 0 && ProfileLines.Num() == 0)
 		return;
 

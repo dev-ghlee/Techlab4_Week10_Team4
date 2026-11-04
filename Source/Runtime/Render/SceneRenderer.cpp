@@ -29,6 +29,7 @@
 #include <atomic>
 #include <cstring>
 #include <utility>
+#include <chrono>
 
 DECLARE_CYCLE_STAT("Frustum Cull", STAT_FrustumCull);
 DECLARE_CYCLE_STAT("Gather Elements", STAT_GatherElements);
@@ -246,6 +247,8 @@ bool FSceneRenderer::AddDecalPass(FRenderGraphBuilder& Graph, FRenderer* Rendere
 
 void FSceneRenderer::RenderDecals(FRenderer* Renderer)
 {
+	const auto StartTime = std::chrono::high_resolution_clock::now();
+
 	if(!World || !Renderer)
 	{
 		return;
@@ -253,6 +256,7 @@ void FSceneRenderer::RenderDecals(FRenderer* Renderer)
 
 	FScene& Scene = World->GetScene();
 	const auto& AllDecals = Scene.GetDecalProxies();
+	RenderData.RenderStats.DecalCount = AllDecals.Num();
 
 	// Get active decals that are visible and should be drawn
 	TArray<const FDecalSceneProxy*> ActiveDecals;
@@ -268,6 +272,8 @@ void FSceneRenderer::RenderDecals(FRenderer* Renderer)
 	{
 		return;
 	}
+
+	RenderData.RenderStats.VisibleDecalCount = ActiveDecals.Num();
 
 	// Sort decals by sort order
 	std::sort(ActiveDecals.begin(), ActiveDecals.end(),
@@ -328,6 +334,7 @@ void FSceneRenderer::RenderDecals(FRenderer* Renderer)
 
 		Receivers.Reset();
 		CollectDecalReceivers(Decal, Receivers);
+		RenderData.RenderStats.DecalReceivers += Receivers.Num();
 
 		if(Receivers.IsEmpty())
 		{
@@ -384,18 +391,21 @@ void FSceneRenderer::RenderDecals(FRenderer* Renderer)
 			RenderCommand::UpdateBufferData(ObjectCB, &LocalToWorld, sizeof(FMatrix));
 			RenderCommand::BindConstantBuffer(0, ObjectCB, EShaderBindFlagBits::Vertex);
 
-			RenderCommand::BindMesh(Mesh, 0);
+			RenderCommand::BindMesh(Mesh, 0);			
 
 			const auto& Sections = Mesh->GetMeshData().Sections;
 			for(const auto& Section : Sections)
 			{			
 				RenderCommand::DrawIndexed(Section.IndexCount,Section.StartIndex);
+				RenderData.RenderStats.DecalDrawCalls++;
 			}
 		}
 	}
 
 	RenderCommand::BindShaderResource(0, static_cast<UTexture2D*>(nullptr), EShaderBindFlagBits::Pixel);
 	RenderCommand::BindShaderResource(1, static_cast<UTexture2D*>(nullptr), EShaderBindFlagBits::Pixel);
+
+	RenderData.RenderStats.DecalPassTimeMs = std::chrono::duration<float, std::milli>(std::chrono::high_resolution_clock::now() - StartTime).count();
 }
 
 void FSceneRenderer::InitViews(FRenderer* Renderer, const FSceneRenderOptions& Options)
