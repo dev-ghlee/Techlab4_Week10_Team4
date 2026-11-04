@@ -68,6 +68,7 @@ private:
 	bool bRenderMesh = true;
 	bool bRenderBones = true;
 
+	FString CurrentAssetPath;
 	FReferenceSkeleton ReferenceSkeleton;
 	USkeletalMeshComponent* PreviewMeshComponent = nullptr;
 	FSkeletalPose PreviewPose;

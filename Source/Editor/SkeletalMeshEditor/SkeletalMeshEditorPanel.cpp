@@ -203,7 +203,17 @@ void FSkeletalMeshEditorPanel::OnRender()
 
 			ImGui::TableNextColumn();
 
-			if (ImGui::BeginChild("##SkeletonTree", ImVec2(0, 850), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY))
+			if (ImGui::BeginChild("##SkeletonInfo", ImVec2(0, 150.0f), ImGuiChildFlags_Borders))
+			{
+				ImGui::SeparatorText("Skeleton Info");
+				ImGui::Text("Path: %s", CurrentAssetPath.c_str());
+				ImGui::Text("Bones: %d", ReferenceSkeleton.RawRefBoneInfo.Num());
+				ImGui::Text("Vertices: %d", PreviewMeshComponent && PreviewMeshComponent->GetMeshObject() ? PreviewMeshComponent->GetMeshObject()->GetSkinnedVertices().Num() : 0);
+			}
+			ImGui::EndChild();
+
+			const float AvailHeight = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y;
+			if (ImGui::BeginChild("##SkeletonTree", ImVec2(0, AvailHeight - 300.0f), ImGuiChildFlags_Borders))
 			{
 				ImGui::SeparatorText("Skeleton Tree");
 				ImGui::SameLine();
@@ -230,7 +240,7 @@ void FSkeletalMeshEditorPanel::OnRender()
 			}
 			ImGui::EndChild();
 
-			if (ImGui::BeginChild("##Details", ImVec2(0, 0), ImGuiChildFlags_Borders))
+			if (ImGui::BeginChild("##Details", ImVec2(0, 300), ImGuiChildFlags_Borders))
 			{
 				ImGui::SeparatorText("Details");
 				
@@ -273,6 +283,7 @@ UWorld* FSkeletalMeshEditorPanel::ReleasePreviewWorld()
 
 bool FSkeletalMeshEditorPanel::OpenAsset(const FString& Path)
 {
+	CurrentAssetPath = Path;
 	if (!LoadMesh(Path))
 	{
 		HTR_LOG(Error, "Failed to open skeletal mesh asset: {}", Path);
@@ -386,8 +397,11 @@ void FSkeletalMeshEditorPanel::DrawBoneTreeNode(int32 BoneIndex)
 	}
 
 	const FString Name = RefBoneInfo.Name.ToString();
+	bool bChanged = ReferenceSkeleton.RawRefBonePose[BoneIndex].Location != PreviewPose.LocalPose[BoneIndex].Location ||
+		ReferenceSkeleton.RawRefBonePose[BoneIndex].Rotation != PreviewPose.LocalPose[BoneIndex].Rotation ||
+		ReferenceSkeleton.RawRefBonePose[BoneIndex].Scale != PreviewPose.LocalPose[BoneIndex].Scale;
 	ImGui::PushID(BoneIndex);
-	bool bOpen = ImGui::TreeNodeEx("##Bone", Flags, "%s", Name.c_str());
+	bool bOpen = ImGui::TreeNodeEx("##Bone", Flags, "%s", (Name + (bChanged ? " *" : "")).c_str());
 	ImGui::PopID();
 
 	if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen())
