@@ -235,11 +235,29 @@ namespace
 		ImGui::SameLine();
 
 		ImGui::BeginGroup();
-		ImGui::Text("Slot %d", SlotIndex);
+		if (SlotIndex == 0)
+		{
+			ImGui::Text("Slot 0 (Base Color)");
+		}
+		else if (SlotIndex == 1)
+		{
+			ImGui::Text("Slot 1 (Normal Map)");
+		}
+		else
+		{
+			ImGui::Text("Slot %d", SlotIndex);
+		}
 
 		if (Texture)
 		{
-			ImGui::TextWrapped("%s", Texture->GetPath().c_str());
+			ImGui::TextWrapped("%s", Texture->GetPath().empty() ? "(Default)" : Texture->GetPath().c_str());
+			if (!Texture->GetPath().empty() && ImGui::SmallButton("Clear"))
+			{
+				Material->Textures[SlotIndex] = (SlotIndex == 1)
+					? UAssetManager::GetAssetByPath<UTexture2D>("FlatNormalTexture")
+					: UAssetManager::GetAssetByPath<UTexture2D>("WhiteTexture");
+				bIsChanged = true;
+			}
 		}
 		else
 		{
@@ -815,7 +833,10 @@ namespace
 
 			if (Property.Class == UMaterial::StaticClass())
 			{
-				bChanged  = DrawTextureSlot(reinterpret_cast<UMaterial**>(ObjPtr), 0);
+				ImGui::BeginGroup();
+				bChanged |= DrawTextureSlot(reinterpret_cast<UMaterial**>(ObjPtr), 0);
+				bChanged |= DrawTextureSlot(reinterpret_cast<UMaterial**>(ObjPtr), 1);
+				ImGui::EndGroup();
 			}
 			else if (Property.Class == UFont::StaticClass())
 			{
