@@ -9,6 +9,7 @@ class FSkeletalMeshSceneProxy : public FPrimitiveSceneProxy
 {
 public:
 	explicit FSkeletalMeshSceneProxy(USkeletalMeshComponent* InComponent);
+	bool IsShown(const FViewContext& View) const override;
 
 	void UpdateDynamicData() override;
 	void UpdateRenderState() override;

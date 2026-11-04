@@ -35,6 +35,7 @@ public:
 	UStaticMesh* GetMesh() const { return Mesh; }
 	bool IsVisible() const { return bVisible; }
 	bool IsShown(bool bGameView) const { return bVisible && !(bGameView && bHiddenInGame); }
+	virtual bool IsShown(const FViewContext& View) const;
 	uint8 GetLODCount() const
 	{
 		const FMeshRenderState* State = GetRenderState();

@@ -11,6 +11,11 @@ FSkeletalMeshSceneProxy::FSkeletalMeshSceneProxy(USkeletalMeshComponent* InCompo
 {
 }
 
+bool FSkeletalMeshSceneProxy::IsShown(const FViewContext& View) const
+{
+	return View.bShowSkeletalMesh && FPrimitiveSceneProxy::IsShown(View);
+}
+
 // 컬링 전에 스키닝을 갱신하고, 이번 렌더링에 사용할 버퍼와 메시 경계를 보관한다.
 void FSkeletalMeshSceneProxy::UpdateDynamicData()
 {
@@ -55,7 +60,7 @@ const FMeshRenderState* FSkeletalMeshSceneProxy::GetRenderState() const
 // 같은 스키닝 결과를 기존 화면·깊이·그림자 렌더링 경로에서 사용한다.
 void FSkeletalMeshSceneProxy::GatherMeshElements(FRenderQueue& Queue, const FViewContext& View) const
 {
-	if (!IsShown(View.bGameView) || !Geometry.IsValid()) return;
+	if (!IsShown(View) || !Geometry.IsValid()) return;
 	for (const FCachedMeshSection& Section : MeshRenderState.Sections)
 	{
 		if (!Section.Material) continue;

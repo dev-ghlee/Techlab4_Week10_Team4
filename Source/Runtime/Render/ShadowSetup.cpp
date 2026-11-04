@@ -247,7 +247,8 @@ void FSceneRenderer::AddInteractingPrimitives(FScene& Scene, FProjectedShadowInf
 		},
 		[&](FPrimitiveSceneProxy* Proxy)
 		{
-			if (!Proxy->bCastsShadow || !Proxy->IsShown(View.bGameView)) return;
+			// 화면 밖의 Caster도 이 뷰의 ShowFlag를 동일하게 적용한다.
+			if (!Proxy->bCastsShadow || !Proxy->IsShown(CachedViewContext)) return;
 			if (!Proxy->GetRenderState() || !Proxy->GetGeometry().IsValid()) return;
 
 			// 카메라에서 너무 작게 보이는 Caster는 그림자도 눈에 띄지 않는다 (r.Shadow.RadiusThreshold).

@@ -63,6 +63,7 @@ struct FEditorSettings
 	bool bShowVignette = true;
 	bool bShowCameraOverlay = true;
 	bool bShowDecal = true;
+	bool bShowSkeletalMesh = true;
 
 	inline uint32 GetDirectionalShadowMapSize() const { return DirectionalShadowMapSizePerLevels[DirectionalShadowMapSizeLevel]; }
 	inline uint32 GetPointShadowMapSize() const { return PointShadowMapSizePerLevels[PointShadowMapSizeLevel]; }

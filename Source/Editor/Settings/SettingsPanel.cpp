@@ -43,6 +43,7 @@ void FSettingsPanel::OnRender()
 
 	ImGui::TextDisabled("Fill mode is configured per viewport.");
 	ImGui::Checkbox("Draw Primitives", &Settings.bDrawPrimitives);
+	ImGui::Checkbox("SkeletalMesh", &Settings.bShowSkeletalMesh);
 	ImGui::Checkbox("Cache Shadows", &Settings.bCacheShadows);
 	ImGui::Checkbox("Draw Bounding Box", &Settings.bDrawBoundingBox);
 	ImGui::Checkbox("Show Object UUID", &Settings.bShowUUID);
@@ -200,6 +201,7 @@ bool FSettingsPanel::SaveSettings() const
 	File << "ShowVignette=" << Settings.bShowVignette << "\n";
 	File << "ShowCameraOverlay=" << Settings.bShowCameraOverlay << "\n";
 	File << "ShowDecal=" << Settings.bShowDecal << "\n";
+	File << "ShowSkeletalMesh=" << Settings.bShowSkeletalMesh << "\n";
 
 	File << "LightCullingMode=" << (Settings.LightCullingMode == ELightCullingMode::Off ? "Off" : Settings.LightCullingMode == ELightCullingMode::Tiled ? "Tiled" : "Clustered") << "\n";
 	File << "RenderingPath=" << (Settings.RenderingPath == ERenderingPath::Forward ? "Forward" : "Deferred") << "\n";
@@ -351,6 +353,7 @@ bool FSettingsPanel::LoadSettings()
 				else if (Key == "ShowVignette")      Settings.bShowVignette = std::stoi(ValueStr);
 				else if (Key == "ShowCameraOverlay") Settings.bShowCameraOverlay = std::stoi(ValueStr);
 				else if (Key == "ShowDecal")         Settings.bShowDecal = std::stoi(ValueStr);
+				else if (Key == "ShowSkeletalMesh")  Settings.bShowSkeletalMesh = std::stoi(ValueStr);
 
 				else if (Key == "LightCullingMode")
 				{

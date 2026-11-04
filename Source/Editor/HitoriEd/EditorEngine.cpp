@@ -1089,6 +1089,7 @@ void UEditorEngine::BuildSceneRenderOptions(FGameViewportClient* ViewClient, FSc
 	Options.bShowVignette = S.bShowVignette;
 	Options.bShowCameraOverlay = S.bShowCameraOverlay;
 	Options.bShowDecal = S.bShowDecal;
+	Options.bShowSkeletalMesh = S.bShowSkeletalMesh;
 }
 
 void UEditorEngine::BuildSceneRenderOptions(FEditorViewportClient* ViewClient, bool IsPIE, FSceneRenderOptions& Options)
@@ -1114,6 +1115,7 @@ void UEditorEngine::BuildSceneRenderOptions(FEditorViewportClient* ViewClient, b
 	Options.bShowVignette = S.bShowVignette;
 	Options.bShowCameraOverlay = S.bShowCameraOverlay;
 	Options.bShowDecal = S.bShowDecal;
+	Options.bShowSkeletalMesh = S.bShowSkeletalMesh;
 
 	Options.bDrawPrimitives = IsPIE || SettingsPanel->GetSettings().bDrawPrimitives;
 	Options.bEnableFog = ViewClient->GetViewportMode() == EViewportMode::Solid;
@@ -1387,7 +1389,11 @@ void UEditorEngine::RenderFrame(FEditorViewportClient* ViewClient,
 								SceneView.bIsPerspective, ViewportSetting);
 					};
 			}
-			if (bIsActiveViewport && Outline->GetTarget())
+			FViewContext OverlayView = SceneView.ToViewContext();
+			OverlayView.bShowSkeletalMesh = SettingsPanel->GetSettings().bShowSkeletalMesh;
+			UPrimitiveComponent* OutlineTarget = Outline->GetTarget();
+			FPrimitiveSceneProxy* OutlineProxy = OutlineTarget ? OutlineTarget->GetSceneProxy() : nullptr;
+			if (bIsActiveViewport && OutlineTarget && (!OutlineProxy || OutlineProxy->IsShown(OverlayView)))
 				Overlays.EditorOutline = [this, &SceneView, ViewportSetting]
 				{
 					OutlineRenderer->OnRender(*Outline, SceneView.ViewProjectionMatrix, ViewportSetting);
