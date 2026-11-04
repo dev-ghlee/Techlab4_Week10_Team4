@@ -37,9 +37,3 @@ ADecalActor::ADecalActor()
 	ArrowComponent->SetHiddenInGame(true);
 	ArrowComponent->bReceivesDecals = false;
 }
-
-void ADecalActor::RegisterAllComponents()
-{
-	Super::RegisterAllComponents();	
-	RootComponent->SetWorldRotation(FRotator(90.0f, 0.0f, 0.0f), false);
-}

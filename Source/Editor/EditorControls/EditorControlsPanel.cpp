@@ -38,7 +38,14 @@ void FEditorControlsPanel::Tick(float DeltaTime)
 void FEditorControlsPanel::AddActor(uint32 Index)
 {
 	if (Index >= static_cast<uint32>(Classes.Num())) return;
-	World->SpawnActor(Classes[Index]);
+	AActor* Spawned = World->SpawnActor(Classes[Index]);
+	if (Spawned && (Classes[Index] == ADecalActor::StaticClass() || Classes[Index] == AFakeSpotLightActor::StaticClass()))
+	{
+		if (USceneComponent* Root = Spawned->GetRootComponent())
+		{
+			Root->SetWorldRotation(FRotator(90.0f, 0.0f, 0.0f), false);
+		}
+	}
 }
 
 // 액터 생성·카메라 속성·기즈모·경로 추적 UI를 그린다.
@@ -110,7 +117,13 @@ void FEditorControlsPanel::OnRender()
 		World->SpawnActor(ASkyLightActor::StaticClass());
 	ImGui::SameLine();
 	if (ImGui::Button("Fake Spot"))
-		World->SpawnActor(AFakeSpotLightActor::StaticClass());
+	{
+		AActor* Spawned = World->SpawnActor(AFakeSpotLightActor::StaticClass());
+		if (Spawned && Spawned->GetRootComponent())
+		{
+			Spawned->GetRootComponent()->SetWorldRotation(FRotator(90.0f, 0.0f, 0.0f), false);
+		}
+	}
 
 	//////////////////////////////////////////////////////
 

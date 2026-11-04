@@ -62,12 +62,6 @@ AFakeSpotLightActor::AFakeSpotLightActor()
 	ArrowComponent->bReceivesDecals = false;
 }
 
-void AFakeSpotLightActor::RegisterAllComponents()
-{
-	Super::RegisterAllComponents();
-	RootComponent->SetWorldRotation(FRotator(90.0f, 0.0f, 0.0f), false);
-}
-
 void AFakeSpotLightActor::PostEditChangeProperty(const FProperty& Property)
 {
 	Super::PostEditChangeProperty(Property);

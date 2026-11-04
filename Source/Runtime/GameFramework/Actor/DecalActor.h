@@ -17,8 +17,6 @@ public:
 
 	UDecalComponent* GetDecal() const { return DecalComponent; }
 
-	virtual void RegisterAllComponents() override;
-
 private:
 	UDecalComponent* DecalComponent;
 	UBillboardComponent* SpriteComponent;

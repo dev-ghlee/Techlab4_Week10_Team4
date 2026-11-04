@@ -15,7 +15,6 @@ class AFakeSpotLightActor : public AActor
 public:
 	AFakeSpotLightActor();
 
-	virtual void RegisterAllComponents() override;
 	virtual void PostEditChangeProperty(const FProperty& Property) override;
 
 	UDecalComponent* GetDecalComponent() const { return DecalComponent; }
