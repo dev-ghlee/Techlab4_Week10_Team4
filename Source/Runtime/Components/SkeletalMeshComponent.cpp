@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "SkeletalMeshComponent.h"
 #include "Engine/SkeletalMeshSceneProxy.h"
+#include "Collision/Ray.h"
 
 FPrimitiveSceneProxy* USkeletalMeshComponent::CreateSceneProxy()
 {
@@ -42,6 +43,43 @@ bool USkeletalMeshComponent::UpdateSkinnedMesh()
 	// 업로드까지 성공한 자세만 반영 완료로 처리한다.
 	ClearPoseDirty();
 	return true;
+}
+
+bool USkeletalMeshComponent::LineTraceComponentLocal(const FRay& LocalRay, float& OutT)
+{
+	// 현재 포즈의 스키닝 결과를 준비한다.
+	// 포즈가 같으면 기존 결과를 재사용한다.
+	if (!SkeletalMesh || !UpdateSkinnedMesh() || !MeshObject)
+		return false;
+
+	// 두 데이터 모두 Component 공간 기준이다.
+	const TArray<FVertex>& Vertices = MeshObject->GetSkinnedVertices();
+	const TArray<uint32>& Indices = SkeletalMesh->GetMeshData().Indices;
+
+	// OutT에는 다른 컴포넌트까지 포함한 현재 최단 거리가 들어온다.
+	float NearestT = OutT;
+	bool bHit = false;
+
+	for (int32 Index = 0; Index + 2 < Indices.Num(); Index += 3)
+	{
+		const FVector& P0 = Vertices[Indices[Index]].Position;
+		const FVector& P1 = Vertices[Indices[Index + 1]].Position;
+		const FVector& P2 = Vertices[Indices[Index + 2]].Position;
+
+		float TriangleT = 0.0f;
+
+		if (RayIntersectsTriangle(LocalRay, P0, P1, P2, TriangleT) && TriangleT < NearestT)
+		{
+			NearestT = TriangleT;
+			bHit = true;
+		}
+	}
+
+	// 실패했을 때는 호출자가 전달한 거리를 유지한다.
+	if (bHit)
+		OutT = NearestT;
+
+	return bHit;
 }
 
 const FSkeletalMeshData* USkeletalMeshComponent::GetSkinnedMeshData() const

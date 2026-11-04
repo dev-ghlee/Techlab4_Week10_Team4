@@ -18,6 +18,7 @@ public:
 
 	// 컬링 전 렌더 준비 단계에서 호출한다. 자세가 같으면 기존 버퍼를 재사용한다.
 	bool UpdateSkinnedMesh();
+	bool LineTraceComponentLocal(const FRay& LocalRay, float& OutT) override;
 	FPrimitiveSceneProxy* CreateSceneProxy() override;
 
 	int32 GetNumMaterials() const override;
