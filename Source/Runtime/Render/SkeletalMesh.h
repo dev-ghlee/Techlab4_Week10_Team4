@@ -45,7 +45,20 @@ public:
 		return IndexBuffer.get();
 	}
 
+	void SetLoadedBakePath(const FString& InPath)
+	{
+		LoadedBakePath = InPath;
+	}
+
+	const FString& GetLoadedBakePath() const
+	{
+		return LoadedBakePath;
+	}
+
 private:
+	// 이번 실행에서 실제로 복원한 바이너리 경로. FBX 임포트 시에는 비어 있다.
+	FString LoadedBakePath;
+
 	// 임포트 완료 후 공유하는 원본 데이터.
 	FSkeletalMeshData MeshData;
 

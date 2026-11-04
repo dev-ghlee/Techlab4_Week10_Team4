@@ -383,6 +383,12 @@ namespace
 				Component->SetSkeletalMesh(Mesh);
 			else
 				*MeshPtr = Mesh;
+
+			// None 선택은 제외하고 캐시에서 복원된 메시만 표시한다.
+			if (Mesh && !Mesh->GetLoadedBakePath().empty())
+			{
+				HTR_LOG(Info, "[FBX Bake] Using restored data: {}", Mesh->GetLoadedBakePath());
+			}
 		};
 
 		ImGui::SetNextItemWidth(-1.0f);
