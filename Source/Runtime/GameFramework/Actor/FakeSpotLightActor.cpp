@@ -15,6 +15,7 @@ AFakeSpotLightActor::AFakeSpotLightActor()
 	SetRootComponent(DecalComponent);
 	DecalComponent->SetDecalSize(FVector(MaxDistance, SpotRadius, SpotRadius));
 	DecalComponent->SetDecalColor(LightColor);
+	DecalComponent->bIsEmissive = true;
 
 	UMaterial* BaseDecalMat = UAssetManager::GetAssetByPath<UMaterial>("DefaultMaterial");
 	if (BaseDecalMat)

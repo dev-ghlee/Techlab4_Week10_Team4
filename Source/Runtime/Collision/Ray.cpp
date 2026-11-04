@@ -43,7 +43,7 @@ bool RayIntersectsAABB(const FPreparedRay& PreparedRay, const FVector& BoxMin, c
     float tExit = _mm_cvtss_f32(minXYZ);
 
     if (tEnter > tExit)
-    {   // 충돌 안함
+    {   // 충돌 안함 
         return false;
     }
 

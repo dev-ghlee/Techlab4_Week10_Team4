@@ -353,7 +353,7 @@ void FSceneRenderer::RenderDecals(FRenderer* Renderer)
 		DecalData.DecalColor.W *= ScreenFadeAlpha;
 
 		FVector DecalForward = FVector(Decal->DecalToWorld.M[0][0], Decal->DecalToWorld.M[0][1], Decal->DecalToWorld.M[0][2]).Normalized();
-		DecalData.DecalForward = FVector4(DecalForward, 0.0f);
+		DecalData.DecalForward = FVector4(DecalForward, Decal->bIsEmissive ? 1.0f : 0.0f);
 
 		RenderCommand::UpdateBufferData(DecalCB, &DecalData, sizeof(DecalData));
 		RenderCommand::BindConstantBuffer(2, DecalCB, EShaderBindFlagBits::Vertex | EShaderBindFlagBits::Pixel);

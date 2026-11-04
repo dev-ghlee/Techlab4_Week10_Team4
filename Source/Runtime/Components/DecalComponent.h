@@ -48,6 +48,9 @@ public:
 	UPROPERTY(EditAnywhere)
 	FColor DecalColor;
 
+	UPROPERTY(EditAnywhere)
+	bool bIsEmissive = false;
+
 	UDecalComponent();
 
 	FDecalSceneProxy* SceneProxy = nullptr;

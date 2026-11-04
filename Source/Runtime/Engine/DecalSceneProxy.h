@@ -46,5 +46,6 @@ public:
 	float FadeStartDelayNormalized = 0.0f;
 	float FadeInStartDelayNormalized = 0.0f;
 	FColor DecalColor;
+	bool bIsEmissive = false;
 	bool DrawInGame = true;	
 };

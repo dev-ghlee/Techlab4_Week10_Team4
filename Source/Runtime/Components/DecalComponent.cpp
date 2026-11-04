@@ -18,6 +18,7 @@ UDecalComponent::UDecalComponent()
     bDestroyOwnerAfterFade = true;
     DecalSize = FVector(1.0f, 1.0f, 1.0f);
     DecalColor = FColor(255, 255, 255, 255);
+    bIsEmissive = false;
     SetRelativeRotation(FRotator(90.0f, 0.0f, 0.0f));
 }
 
@@ -137,6 +138,7 @@ FColor UDecalComponent::GetDecalColor() const
 void UDecalComponent::SetDecalColor(FColor InColor)
 {
     DecalColor = InColor;
+    MarkRenderStateDirty();
 }
 
 void UDecalComponent::BeginPlay()
@@ -163,7 +165,7 @@ void UDecalComponent::PostEditChangeProperty(const FProperty& Property)
 {
     Super::PostEditChangeProperty(Property);
 
-	if(Property.Name == "DecalMaterial" || Property.Name == "DecalColor" || Property.Name == "SortOrder" || Property.Name == "FadeScreenSize" || Property.Name == "FadeStartDelay" || Property.Name == "FadeDuration" || Property.Name == "FadeInDuration" || Property.Name == "FadeInStartDelay" || Property.Name == "bDestroyOwnerAfterFade")
+	if(Property.Name == "DecalMaterial" || Property.Name == "DecalColor" || Property.Name == "bIsEmissive" || Property.Name == "SortOrder" || Property.Name == "FadeScreenSize" || Property.Name == "FadeStartDelay" || Property.Name == "FadeDuration" || Property.Name == "FadeInDuration" || Property.Name == "FadeInStartDelay" || Property.Name == "bDestroyOwnerAfterFade")
 	{
 		SceneProxy->UpdateRenderState();
 	}
