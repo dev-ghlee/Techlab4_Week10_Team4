@@ -149,6 +149,8 @@ void UDecalComponent::BeginPlay()
     if(SceneProxy)
     {
         SceneProxy->InitializeFadingParameters(SpawnTime, FadeDuration, FadeStartDelay, FadeInDuration, FadeInStartDelay);
+        SceneProxy->UpdateRenderState();
+        SceneProxy->UpdateTransform();
     }
 
     SetLifeSpan(FadeStartDelay + FadeDuration);
@@ -178,6 +180,17 @@ void UDecalComponent::PostEditChangeProperty(const FProperty& Property)
 FBox UDecalComponent::CalcLocalBounds() const
 {
     return FBox(-DecalSize, DecalSize);
+}
+
+void UDecalComponent::Serialize(FStructuredArchive::FRecord Record)
+{
+    Super::Serialize(Record);
+
+    if(Record.GetUnderlyingArchive().IsLoading())
+    {
+        MarkRenderStateDirty();
+        OnTransformDirty();
+    }
 }
 
 void UDecalComponent::SetLifeSpan(const float LifeSpan)

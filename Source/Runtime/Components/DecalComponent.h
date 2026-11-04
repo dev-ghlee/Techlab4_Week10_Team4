@@ -92,6 +92,7 @@ public:
 
 	virtual FBox CalcLocalBounds() const override;
 
+	virtual void Serialize(FStructuredArchive::FRecord Record) override;
 
 	// Decal Component functions
 	void SetLifeSpan(const float LifeSpan);

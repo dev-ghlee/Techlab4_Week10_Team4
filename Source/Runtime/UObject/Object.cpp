@@ -243,6 +243,17 @@ void UObject::SerializeScriptProperties(FStructuredArchive::FSlot Slot)
 			case EPropertyType::Transform: Value << *static_cast<FTransform*>(Ptr); break;
 			case EPropertyType::Object:
 			{
+				if(Property.Class == UMaterial::StaticClass())
+				{
+					UMaterial* Mat = *reinterpret_cast<UMaterial**>(Ptr);
+					UMaterial::SerializeMaterialReference(Value, Mat);
+					if(bIsLoading)
+					{
+						*reinterpret_cast<UMaterial**>(Ptr) = Mat;
+					}
+					break;
+				}
+
 				UObject*& Ref = *static_cast<UObject**>(Ptr);
 				UObject* Previous = Ref;
 				Value << Ref;
